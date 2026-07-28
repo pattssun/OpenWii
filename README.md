@@ -1,10 +1,12 @@
-# 🍉 fruit-ninja — motion controlled
+# 🕹 OpenWii
 
-Your phone is the sword. Swing it in the air; the blade on your PC screen follows
-and slices fruit. Built to the breakdown in [SPEC.md](SPEC.md).
+Motion-controlled games for your computer. **Your phone is the remote.**
+
+Open a page on your PC, scan a QR code with your phone, and swing. No app, no
+dongle, no console — the phone's IMU streams over your LAN and drives the game.
 
 ```
-phone IMU ──60Hz──▶ Socket.io ──▶ Node relay ──▶ PC canvas ──▶ cursor + slice
+phone IMU ──60Hz──▶ Socket.io ──▶ Node relay ──▶ PC canvas ──▶ cursor + gameplay
 ```
 
 ## Run it
@@ -14,17 +16,13 @@ npm install
 npm start
 ```
 
-Then:
-
-1. Open **https://localhost:8443/** on the PC — the start screen shows a QR code.
+1. Open **https://localhost:8443/** on the PC — the launcher shows a QR code.
 2. Scan it with your phone (same Wi-Fi). Accept the certificate warning.
-3. Tap **Enable motion sensors**. Calibration starts automatically:
-   - **Hold still** — grip the phone however you like and point it at the screen.
-   - **Swing it around** — big sweeps, side to side then up and down.
-4. The game starts as soon as calibration lands. Swing to slice.
+3. Tap **Enable motion sensors**.
+4. Pick a game. Calibration runs, then you play.
 
-Grip it however is comfortable — flat in your palm like a Wii remote, or upright
-like a TV remote. Calibration works out which way you're pointing (see below).
+Grip the phone however is comfortable — flat in your palm like a Wii remote, or
+upright like a TV remote. Calibration works out which way you're pointing.
 
 ### Why HTTPS — this is the #1 thing that breaks
 
@@ -37,38 +35,74 @@ is indistinguishable from a broken phone unless you go looking.
 So the controller refuses to pretend: on a non-secure origin it disables the
 Enable button, says why, and dumps the full capability report.
 
-The server generates a self-signed cert on first boot (SANs cover localhost and
-your LAN IP) — click through the warning once per device. `HTTP=1 npm start`
-forces plain HTTP; fine for working on the game loop with a mouse, useless for
+The server generates a self-signed cert on first boot and regenerates it when
+your LAN IP changes — click through the warning once per device. `HTTP=1 npm start`
+forces plain HTTP; fine for working on a game loop with a mouse, useless for
 actual phone control.
 
-## Controls (PC)
+## Games
 
-| Key | Action |
-| --- | --- |
-| `Space` | Start / restart (skips a calibration step you're stuck on) |
-| `R` | Full recalibration |
-| `C` | Quick re-centre — re-zero the neutral pose, keep the sensitivity |
-| `M` | Cycle mapping: relative → absolute → gyro |
-| `←` `→` | Sensitivity |
-| `X` / `Y` | Invert axis |
-| `D` | Debug overlay (detected grip, live yaw/pitch, blade speed, sensor Hz) |
+| Game | | |
+| --- | --- | --- |
+| 🍉 **Fruit Ninja** | Swing the phone like a sword. Slice fruit, dodge bombs. | [`games/fruit-ninja`](games/fruit-ninja) |
 
-The phone has **Re-center**, **Start**, and **Recalibrate from scratch** buttons,
-and mirrors the calibration prompts — you're holding it, not looking at the
-monitor.
+## Adding a game
 
-Moving the mouse drives the blade whenever no phone is streaming, so the game is
-playable and debuggable on its own.
+Drop a folder into `games/` with an `index.html`. The server discovers it on
+boot and the launcher lists it — there is no registry to edit.
+
+```
+games/your-game/
+  index.html     loads /socket.io/socket.io.js, then your own game.js
+  game.json      { title, tagline, emoji }   ← optional, for the launcher card
+```
+
+Your game client registers as the `game` role and listens for `orientation`:
+
+```js
+const socket = io();
+socket.on('connect', () => socket.emit('register', 'game'));
+socket.on('orientation', (sample) => { /* sample.alpha/beta/gamma or sample.quat */ });
+socket.emit('feedback', { type: 'slice' });   // → phone haptics
+```
+
+Fruit Ninja's [`game.js`](games/fruit-ninja/game.js) carries the reference
+implementation of the orientation→cursor mapping described below. It is not yet
+extracted into a shared module — the second game is the right time to do that,
+once there's real evidence about which parts generalise.
+
+## Architecture
+
+```
+server.js              Express + Socket.io relay. Holds no game state.
+scripts/gen-cert.js    Self-signed cert with your LAN IP in the SANs.
+public/index.html      Launcher: pairing QR + game list.
+public/controller.*    The remote. Shared by every game.
+games/<slug>/          One folder per game, auto-discovered.
+```
+
+The server is a dumb switchboard — `orientation` and `motion` go phone→PC,
+`command` (calibrate/start) goes phone→PC, `feedback` (slice/bomb/miss) goes
+PC→phone for haptics.
+
+**Nothing is sent `volatile`.** Volatile looks perfect for a 60Hz sensor stream —
+drop a stale sample rather than queue it — but Socket.IO discards volatile
+packets whenever `transport.writable` is false, and on the **long-polling**
+transport that is true most of the time. Measured on a polling connection:
+**6 of 100 volatile packets delivered, versus all 100 plain ones.** A connection
+that falls back to polling (easy to trigger with a self-signed cert) therefore
+loses essentially the whole orientation stream while ordinary emits are
+unaffected — so the phone pairs, buttons work, calibration starts, and nothing
+moves. The rAF rate cap on the sender is the real backpressure control.
 
 ## Why calibration is not optional
 
 The naive approach — treat the phone's top edge as the aim axis and read yaw off
 `alpha` — works only for the grip you happened to assume. Hold the phone upright
 like a TV remote and the top edge points at the **ceiling**: that's the gimbal
-singularity, yaw stops meaning anything, and swinging sideways moves the blade
+singularity, yaw stops meaning anything, and swinging sideways moves the cursor
 *not at all*. This is a silent failure — the connection is fine, data is
-streaming at 60Hz, and the blade just won't go left or right.
+streaming at 60Hz, and it just won't go left or right.
 
 So rather than assume a grip, we measure one:
 
@@ -88,9 +122,9 @@ Press `R` to redo it, `C` to just re-zero the neutral pose mid-game.
 
 The phone reports `alpha`/`beta`/`gamma` (a ZXY Euler triple). Feeding those to
 the screen directly is a trap: `gamma` gimbal-locks and `alpha` jumps 360→0.
-[`public/game.js`](public/game.js) builds the W3C rotation matrix and reads its
-*columns* — the phone's three body axes in world coordinates — then measures
-yaw/pitch inside the calibrated frame above.
+The client builds the W3C rotation matrix and reads its *columns* — the phone's
+three body axes in world coordinates — then measures yaw/pitch inside the
+calibrated frame above.
 
 Three interchangeable mappings (`M` to cycle):
 
@@ -110,44 +144,39 @@ poison: smoothing gives `cursor += α·(target − cursor)`, so feeding it
 scaled by the smoothing coefficient, about 0.14 at rest. Small and medium swings
 land at a seventh of their intended size.
 
-Positions run through a **One Euro filter**: heavy smoothing when the blade is
-near-still (kills IMU jitter), almost none when swinging (keeps slashes crisp). A
-plain moving average would smear every fast slice.
+Positions run through a **One Euro filter**: heavy smoothing when the cursor is
+near-still (kills IMU jitter), almost none when swinging (keeps fast motion
+crisp). A plain moving average would smear every quick gesture.
 
-Slicing tests each fruit circle against the trail segments added that frame
-(point-to-segment distance ≤ radius), gated on blade speed measured over a 55ms
-window. The window matters: single-sample velocity divides by packet
+Fruit Ninja's slicing tests each fruit circle against the trail segments added
+that frame (point-to-segment distance ≤ radius), gated on blade speed measured
+over a 55ms window. The window matters: single-sample velocity divides by packet
 inter-arrival time, so one network hitch fabricates a huge speed and a motionless
 blade starts cutting.
 
-## Layout
+## Controls (PC)
 
-```
-server.js              Express + Socket.io relay. Holds no game state.
-scripts/gen-cert.js    Self-signed cert with your LAN IP in the SANs.
-public/controller.*    Phone: permission gate, 60Hz sensor stream, haptics.
-public/index.html      PC: canvas, HUD, pairing screen.
-public/game.js         PC: mapping, trail, physics, collision, render.
-```
+| Key | Action |
+| --- | --- |
+| `Space` | Start / restart (skips a calibration step you're stuck on) |
+| `R` | Full recalibration |
+| `C` | Quick re-centre — re-zero the neutral pose, keep the sensitivity |
+| `M` | Cycle mapping: relative → absolute → gyro |
+| `←` `→` | Sensitivity |
+| `X` / `Y` | Invert axis |
+| `D` | Debug overlay (detected grip, live yaw/pitch, speed, sensor Hz) |
 
-The server is a dumb switchboard — `orientation` and `motion` go phone→PC,
-`command` (calibrate/start) goes phone→PC, `feedback` (slice/bomb/miss) goes
-PC→phone for haptics.
+The phone has **Re-center**, **Start**, and **Recalibrate from scratch** buttons,
+and mirrors the calibration prompts — you're holding it, not looking at the
+monitor.
 
-**Nothing is sent `volatile`.** Volatile looks perfect for a 60Hz sensor stream —
-drop a stale sample rather than queue it — but Socket.IO discards volatile
-packets whenever `transport.writable` is false, and on the **long-polling**
-transport that is true most of the time. Measured on a polling connection:
-**6 of 100 volatile packets delivered, versus all 100 plain ones.** A connection
-that falls back to polling (easy to trigger with a self-signed cert) therefore
-loses essentially the whole orientation stream while ordinary emits are
-unaffected — so the phone pairs, buttons work, calibration starts, and the blade
-never moves. The rAF rate cap on the sender is the real backpressure control.
+Moving the mouse drives the cursor whenever no phone is streaming, so games stay
+playable and debuggable on their own.
 
 ## If it isn't working
 
-The controller page shows `sensor N Hz · sent N Hz · <transport>`. That line
-separates the two failure modes:
+The controller page shows `sensor N Hz · sent N Hz · <transport> · <source>`.
+That line separates the failure modes:
 
 | Reading | Meaning |
 | --- | --- |
@@ -155,9 +184,6 @@ separates the two failure modes:
 | `sensor 0 Hz` | The phone isn't producing data. The warning card names the cause and shows a capability dump. |
 | `sensor 60 Hz`, `sent 60 Hz`, PC still waiting | Data leaves the phone but doesn't arrive — transport or routing, not sensors. |
 | yaw/pitch/roll frozen | Events fire but carry no values. Move the phone in a figure-8 to settle the compass. |
-
-The last field of the rates line names the active source —
-`deviceorientation` or `OrientationSensor`.
 
 **Sensor fallback.** If no `deviceorientation` event fires within 1.5s of being
 enabled, the controller escalates to the Generic Sensor API
@@ -167,9 +193,6 @@ the legacy events it reports *named* failures — `SecurityError`,
 even when it can't work it says why. It streams a quaternion, which the PC
 prefers anyway: no Euler decode, no gimbal edge cases. Both representations
 decode to identical body axes (verified to 4.4e-16).
-
-On the PC, `D` toggles a debug overlay with the detected grip, live yaw/pitch,
-blade speed, packet rate, and whether samples arrived as Euler or quaternion.
 
 ## Verified
 
@@ -194,7 +217,7 @@ Transport — on a polling connection, volatile delivered 6/100 packets while
 plain delivered 100/100 ✅ · end-to-end with the real pages, calibration advanced
 signal → steady → range on live relayed data ✅
 
-Secure context — loaded over `http://192.168.4.233:8080`, the controller reports
+Secure context — loaded over an `http://` LAN address, the controller reports
 `isSecureContext: false`, disables Enable, and explains why ✅
 
 Quaternion fallback — decodes to the same body axes as the Euler path across 10
@@ -204,7 +227,16 @@ on the quaternion path ✅
 
 ## Where to take it next
 
-Per SPEC.md's modification point: swap the mapping (a Kalman filter fusing
-`gyro` rate with `absolute` orientation would beat all three current modes —
-gyro for responsiveness, orientation to cancel drift), or replace the canvas
-renderer with Three.js and let fruit arc through actual 3D space.
+More games — bowling, tennis, sword fighting, anything that wants a swing. The
+mapping engine is the reusable part; extracting it into a shared module is the
+natural first refactor once a second game exists.
+
+On the mapping itself: a Kalman filter fusing `gyro` rate with `absolute`
+orientation would beat all three current modes — gyro for responsiveness,
+orientation to cancel drift.
+
+## Name
+
+Not affiliated with, endorsed by, or connected to Nintendo. "Wii" is Nintendo's
+trademark; this project is an independent, open-source take on playing
+motion-controlled games in a browser.

@@ -1,17 +1,19 @@
 'use strict';
 
 /**
- * fruit-ninja — LAN relay server.
+ * OpenWii — LAN relay server.
  *
- * Serves two clients and pipes messages between them:
- *   /            → PC game client (canvas)
- *   /controller  → phone controller (IMU sender)
+ * Serves the clients and pipes messages between them:
+ *   /                     → game launcher
+ *   /controller           → phone controller (the "remote", shared by all games)
+ *   /games/<slug>/        → a game's PC client
  *
  * The server holds no game state. It is a dumb, low-latency switchboard so the
  * phone's orientation stream reaches the PC with as few hops as possible.
  */
 
 const express = require('express');
+const fs = require('fs');
 const http = require('http');
 const https = require('https');
 const path = require('path');
@@ -21,9 +23,38 @@ const { ensureCert, localAddresses } = require('./scripts/gen-cert');
 
 const PORT = Number(process.env.PORT) || 8443;
 const FORCE_HTTP = process.env.HTTP === '1';
+const GAMES_DIR = path.join(__dirname, 'games');
 
 const app = express();
 app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
+app.use('/games', express.static(GAMES_DIR, { extensions: ['html'] }));
+
+/**
+ * Discover games from disk rather than a hardcoded list: a game is any folder
+ * under games/ with an index.html. Dropping in a new folder is the whole
+ * install step.
+ */
+function listGames() {
+  let entries;
+  try {
+    entries = fs.readdirSync(GAMES_DIR, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  return entries
+    .filter((e) => e.isDirectory() && fs.existsSync(path.join(GAMES_DIR, e.name, 'index.html')))
+    .map((e) => {
+      const meta = { title: e.name, tagline: '', emoji: '🎮' };
+      try {
+        Object.assign(meta, JSON.parse(fs.readFileSync(path.join(GAMES_DIR, e.name, 'game.json'), 'utf8')));
+      } catch { /* game.json is optional */ }
+      return { slug: e.name, url: `/games/${e.name}/`, ...meta };
+    })
+    .sort((a, b) => a.title.localeCompare(b.title));
+}
+
+app.get('/api/games', (_req, res) => res.json(listGames()));
 
 const tls = FORCE_HTTP ? null : ensureCert();
 const server = tls ? https.createServer(tls, app) : http.createServer(app);
@@ -114,10 +145,13 @@ io.on('connection', (socket) => {
 server.listen(PORT, '0.0.0.0', () => {
   const line = '─'.repeat(52);
   console.log(`\n${line}`);
-  console.log('  🍉  fruit-ninja — motion controlled');
+  console.log('  🕹  OpenWii — your phone is the remote');
   console.log(line);
-  console.log(`  PC game     ${scheme}://localhost:${PORT}/`);
-  console.log(`  Phone sword ${controllerUrl}`);
+  console.log(`  Launcher      ${scheme}://localhost:${PORT}/`);
+  console.log(`  Phone remote  ${controllerUrl}`);
+  const games = listGames();
+  console.log(`\n  ${games.length} game${games.length === 1 ? '' : 's'}:`);
+  for (const g of games) console.log(`    ${g.emoji}  ${g.title}  →  ${g.url}`);
   if (!tls) {
     console.log('\n  ⚠  Running plain HTTP. Phone sensors will NOT work off');
     console.log('     localhost — browsers gate the IMU behind a secure context.');

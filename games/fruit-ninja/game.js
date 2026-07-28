@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * fruit-ninja — PC game client.
+ * Fruit Ninja — PC game client (OpenWii).
  *
  * Receives phone orientation over Socket.io, maps it to a screen-space blade
  * cursor, and runs the game loop on a 2D canvas.

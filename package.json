@@ -1,8 +1,8 @@
 {
-  "name": "fruit-ninja",
+  "name": "openwii",
   "version": "0.1.0",
   "private": true,
-  "description": "Motion-controlled Fruit Ninja — phone as a wireless sword, PC as the screen.",
+  "description": "Motion-controlled games for your computer — your phone is the remote.",
   "type": "commonjs",
   "main": "server.js",
   "scripts": {

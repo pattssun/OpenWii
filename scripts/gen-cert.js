@@ -66,7 +66,7 @@ function ensureCert({ quiet = false } = {}) {
         '-keyout', KEY_PATH,
         '-out', CRT_PATH,
         '-days', '825',
-        '-subj', '/CN=fruit-ninja.local',
+        '-subj', '/CN=openwii.local',
         '-addext', `subjectAltName=${altNames}`,
       ],
       { stdio: 'ignore' }
