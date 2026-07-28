@@ -221,6 +221,66 @@ test('prediction does not fling the cursor when the hand stops', () => {
   assert.ok(peak < 0.06, `overshoot ${(peak * 100).toFixed(1)}% of screen`);
 });
 
+/**
+ * The phone as it really behaves: `deviceorientation` is the OS's *fused*
+ * attitude estimate and lags reality; `rotationRate` is the raw gyro and does
+ * not. Every earlier simulation here fed the pointer a perfect orientation
+ * signal, which hid the single largest source of felt latency.
+ */
+function laggedPhone({ mode, fuseLagMs, hz = 1, amp = 20, secs = 6 }) {
+  const DPS = 45;
+  const FRAME = 1000 / 60;
+  const WIRE = 15;
+  const p = new Pointer({ mode });
+  p.mode = mode;
+  p.degPerScreenX = DPS;
+  p.degPerScreenY = DPS;
+  p.recenterSpring = 0;
+  p.setFrame(buildFrame(bodyAxes(0, 0, 0)));
+  p.recentre();
+
+  const alphaAt = (ms) => -amp * Math.sin((2 * Math.PI * hz * ms) / 1000);
+  const rzAt = (ms) => -amp * 2 * Math.PI * hz * Math.cos((2 * Math.PI * hz * ms) / 1000);
+
+  let s = 0;
+  let last = 0;
+  let sum = 0;
+  let n = 0;
+  for (let ms = 0; ms <= secs * 1000; ms += FRAME) {
+    while (s + WIRE <= ms) {
+      const dt = last ? (s - last) / 1000 : 1 / 60;
+      last = s;
+      const sample = { alpha: alphaAt(s - fuseLagMs), beta: 0, gamma: 0 };
+      if (mode !== 'absolute') sample.motion = { rx: 0, ry: 0, rz: rzAt(s) };
+      p.update(sample, dt, ms);
+      s += 1000 / 60;
+    }
+    if (ms < 2000) continue;                  // sign detection + fusion settle
+    sum += Math.abs(p.sampleAt(ms).x - (0.5 + -alphaAt(ms) / DPS));
+    n += 1;
+  }
+  return { err: sum / n, sign: p.gyroSign.yaw };
+}
+
+test('gyro fusion recovers the OS fusion latency', () => {
+  // deviceorientation lag is inherent to the platform and cannot be filtered
+  // away downstream. Integrating the raw gyro and correcting slowly toward
+  // orientation is the only way to get it back.
+  const fused = laggedPhone({ mode: 'fusion', fuseLagMs: 60 });
+  const orientationOnly = laggedPhone({ mode: 'absolute', fuseLagMs: 60 });
+  assert.ok(fused.err < orientationOnly.err * 0.5,
+    `${(orientationOnly.err * 100).toFixed(1)}% → ${(fused.err * 100).toFixed(1)}%`);
+});
+
+test('the gyro sign is discovered from the data, not assumed', () => {
+  // rotationRate sign conventions differ between platforms. Getting it wrong
+  // makes the fast and slow paths fight, which is worse than no fusion at all.
+  const { sign } = laggedPhone({ mode: 'fusion', fuseLagMs: 30 });
+  assert.notEqual(sign, 0, 'a sign was determined');
+  const err = laggedPhone({ mode: 'fusion', fuseLagMs: 30 }).err;
+  assert.ok(err < 0.04, `and it is the right one — error ${(err * 100).toFixed(1)}%`);
+});
+
 /** Cursor travel while the hand is still and only the sensor is noisy. */
 function restingWobble({ noiseDeg, dps, gated = true }) {
   const p = calibratedPointer(0, 0, 0, { mode: 'absolute' });

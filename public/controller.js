@@ -158,11 +158,17 @@ function onMotion(e) {
     ax: a ? a.x || 0 : 0,
     ay: a ? a.y || 0 : 0,
     az: a ? a.z || 0 : 0,
-    // Rotation rate is the cleanest "how fast am I swinging" signal available.
+    // The raw gyroscope. Unlike `deviceorientation` — which is the OS's fused
+    // attitude estimate and carries that fusion's latency — this is a direct
+    // readout of angular velocity, and it is what makes the cursor feel
+    // immediate. The PC integrates it and corrects against orientation.
     rz: r ? r.alpha || 0 : 0,
     rx: r ? r.beta || 0 : 0,
     ry: r ? r.gamma || 0 : 0,
   };
+  // Send on the motion event too. Gating the gyro behind orientation events
+  // would throw away exactly the freshness we're here for.
+  flush();
 }
 
 // ── Capability probe ───────────────────────────────────────────────────────

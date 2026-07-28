@@ -2,14 +2,17 @@ import { clamp, dot, angleDelta, axesFromSample } from './orientation.js';
 import { OneEuro } from './filter.js';
 import { anglesIn, forwardOf } from './calibration.js';
 
-export const MODES = ['hybrid', 'absolute', 'relative', 'gyro'];
+export const MODES = ['fusion', 'hybrid', 'absolute', 'relative', 'gyro'];
 
 /**
  * Screen pointer driven by phone attitude.
  *
- *   hybrid   — absolute aiming with slow drift correction. Default, and the
- *              closest thing to the Wii Remote's IR pointing that a phone can
- *              manage without a sensor bar.
+ *   fusion   — DEFAULT. Gyro integrated for immediate response, corrected
+ *              slowly toward the fused orientation so it never drifts, then
+ *              the same long-horizon drift correction as hybrid. The closest
+ *              a phone gets to the Wii Remote's IR pointing.
+ *   hybrid   — absolute aiming with slow drift correction, plus fusion when
+ *              rotationRate is available.
  *   absolute — raw angle off neutral. No drift correction, so magnetometer
  *              wander accumulates.
  *   relative — integrates the *change* in angle, like a mouse. Never gets lost;
@@ -18,7 +21,7 @@ export const MODES = ['hybrid', 'absolute', 'relative', 'gyro'];
  */
 export class Pointer {
   constructor(options = {}) {
-    this.mode = options.mode || 'hybrid';
+    this.mode = options.mode || 'fusion';
     this.sensitivity = options.sensitivity ?? 1;
     this.degPerScreenX = options.degPerScreenX ?? 55;
     this.degPerScreenY = options.degPerScreenY ?? 38;
@@ -127,6 +130,37 @@ export class Pointer {
     this.gateLo = options.gateLo ?? 0.12;        // screen fractions/sec
     this.gateHi = options.gateHi ?? 0.45;
     this.noiseDeg = 0;
+
+    /**
+     * Complementary fusion — the thing that actually removes the latency.
+     *
+     * `deviceorientation` is not a sensor reading. It is the OS's *fused*
+     * attitude estimate, and that fusion carries tens of milliseconds of
+     * inherent lag that no downstream filtering can recover. The raw gyroscope
+     * (`rotationRate`) has almost none: it is a direct readout of angular
+     * velocity.
+     *
+     * So: integrate the gyro for immediate response, and bleed slowly toward
+     * the fused orientation to cancel the integration drift. Fast path for
+     * feel, slow path for truth. This is how a Wii Remote feels instant while
+     * still knowing where it is pointing.
+     */
+    this.fusionTau = options.fusionTau ?? 0.4;   // how fast orientation corrects the gyro
+    this.fused = { yaw: null, pitch: null };
+
+    /**
+     * Which way the gyro points is decided by evidence, not by assumption.
+     *
+     * `rotationRate` sign conventions have differed between platforms, and
+     * getting it wrong makes the fast and slow paths fight each other — which
+     * would feel *worse* than no fusion at all, in a way that is hard to spot.
+     * So we correlate the gyro's projected rate against the orientation's own
+     * derivative and adopt whichever sign the data supports. Until there is
+     * enough evidence, fusion stays off and orientation drives alone.
+     */
+    this.gyroSign = { yaw: 0, pitch: 0 };
+    this.gyroCorr = { yaw: 0, pitch: 0 };
+    this.gyroSeen = 0;
   }
 
   /**
@@ -183,6 +217,9 @@ export class Pointer {
     this.driftYaw = 0;
     this.driftPitch = 0;
     this.prev = null;
+    this.fused.yaw = null;
+    this.fused.pitch = null;
+    this.prevAngles = null;
     this.filterX.reset();
     this.filterY.reset();
   }
@@ -206,7 +243,51 @@ export class Pointer {
     if (!this.frame) return null;
 
     const fwd = forwardOf(this.frame, axes);
-    const { yaw, pitch } = anglesIn(this.frame, fwd);
+    let { yaw, pitch } = anglesIn(this.frame, fwd);
+
+    // ── Gyro fusion ────────────────────────────────────────────────────────
+    if (sample.motion && (this.mode === 'fusion' || this.mode === 'hybrid')) {
+      const { rx = 0, ry = 0, rz = 0 } = sample.motion;
+      const omega = { x: rx, y: ry, z: rz };
+      // Body-frame angular velocity projected onto the calibrated frame's
+      // yaw (up) and pitch (right) axes.
+      const gYaw = dot(omega, {
+        x: dot(axes.x, this.frame.u), y: dot(axes.y, this.frame.u), z: dot(axes.z, this.frame.u),
+      });
+      const gPitch = dot(omega, {
+        x: dot(axes.x, this.frame.r), y: dot(axes.y, this.frame.r), z: dot(axes.z, this.frame.r),
+      });
+
+      // Learn the sign by correlating against the orientation's own derivative.
+      if (this.prevAngles) {
+        const oYaw = angleDelta(yaw, this.prevAngles.yaw) / dt;
+        const oPitch = (pitch - this.prevAngles.pitch) / dt;
+        // Only learn from real motion; noise correlates with nothing.
+        if (Math.abs(oYaw) > 8 || Math.abs(oPitch) > 8) {
+          this.gyroCorr.yaw += oYaw * gYaw;
+          this.gyroCorr.pitch += oPitch * gPitch;
+          this.gyroSeen += 1;
+          if (this.gyroSeen > 8) {
+            if (this.gyroCorr.yaw !== 0) this.gyroSign.yaw = Math.sign(this.gyroCorr.yaw);
+            if (this.gyroCorr.pitch !== 0) this.gyroSign.pitch = Math.sign(this.gyroCorr.pitch);
+          }
+        }
+      }
+      this.prevAngles = { yaw, pitch };
+
+      if (this.gyroSign.yaw !== 0) {
+        if (this.fused.yaw === null) { this.fused.yaw = yaw; this.fused.pitch = pitch; }
+        // Fast: integrate the gyro. Slow: bleed toward the fused orientation.
+        this.fused.yaw += this.gyroSign.yaw * gYaw * dt;
+        this.fused.pitch += this.gyroSign.pitch * gPitch * dt;
+        const k = clamp(dt / this.fusionTau, 0, 1);
+        this.fused.yaw += angleDelta(yaw, this.fused.yaw) * k;
+        this.fused.pitch += (pitch - this.fused.pitch) * k;
+        yaw = this.fused.yaw;
+        pitch = this.fused.pitch;
+      }
+    }
+
     this.angles = { yaw, pitch };
 
     // Fraction of a screen per degree, so games get resolution-independent aim.
@@ -216,7 +297,7 @@ export class Pointer {
     let tx;
     let ty;
 
-    if (this.mode === 'hybrid') {
+    if (this.mode === 'hybrid' || this.mode === 'fusion') {
       // Exponential smoothing toward the long-run mean. Using the exact
       // exponential rather than (dt/tau) keeps the time constant honest even
       // when packet intervals wobble.

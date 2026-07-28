@@ -246,7 +246,7 @@ function drawTrail() {
 const audio = new AudioEngine();
 
 // ── Pointer + calibration ──────────────────────────────────────────────────
-const pointer = new Pointer({ mode: 'hybrid' });
+const pointer = new Pointer({ mode: 'fusion' });
 let lastSample = null;
 let lastSampleAt = 0;
 

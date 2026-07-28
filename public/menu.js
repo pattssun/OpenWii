@@ -377,7 +377,7 @@ scene.add(hand);
 
 // ── State ──────────────────────────────────────────────────────────────────
 const audio = new AudioEngine();
-const pointer = new Pointer({ mode: 'hybrid' });
+const pointer = new Pointer({ mode: 'fusion' });
 let lastSample = null;
 let lastSampleAt = 0;
 let hovered = null;         // tile | arrow | 'wii' | null
@@ -699,6 +699,7 @@ setInterval(() => {
     `pointer     ${pointer.display.x.toFixed(3)}, ${pointer.display.y.toFixed(3)}`,
     `lead        ${(pointer.lead*1000).toFixed(0)}ms  vel ${Math.hypot(pointer.vel.x, pointer.vel.y).toFixed(2)}/s`,
     `hand noise  ${pointer.noiseDeg.toFixed(2)}deg  gate ${pointer.gateLo.toFixed(2)}`,
+    `gyro fusion ${pointer.gyroSign.yaw ? 'on (sign ' + pointer.gyroSign.yaw + ')' : 'learning…'}`,
     `deg/screen  ${pointer.degPerScreenX.toFixed(0)} x ${pointer.degPerScreenY.toFixed(0)}  cutoff ${pointer.filterX.minCutoff.toFixed(1)}Hz`,
     `mode        ${pointer.mode}`,
     `grip        ${pointer.frame ? (pointer.frame.axis === 'y' ? 'flat' : 'upright') : '—'}`,
