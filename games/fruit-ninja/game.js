@@ -1,7 +1,7 @@
 import * as THREE from '/vendor/three/three.module.js';
 import { FruitNinja, FIELD_H } from './logic.js';
 import { Pointer } from '../../core/pointer.js';
-import { Calibration, loadCalibration, fetchBootId } from '../../core/calibration.js';
+import { Calibration, loadCalibration, fetchBootId, saveSensitivity, loadSensitivity } from '../../core/calibration.js';
 import { AudioEngine } from '../../core/audio.js';
 import { GameLink } from '../../core/net.js';
 import { clamp } from '../../core/orientation.js';
@@ -247,6 +247,7 @@ const audio = new AudioEngine();
 
 // ── Pointer + calibration ──────────────────────────────────────────────────
 const pointer = new Pointer({ mode: 'fusion' });
+pointer.sensitivity = loadSensitivity() ?? 1;
 let lastSample = null;
 let lastSampleAt = 0;
 
@@ -474,11 +475,13 @@ window.addEventListener('keydown', (e) => {
     }
     case 'arrowright':
       pointer.sensitivity = clamp(pointer.sensitivity * 1.12, 0.2, 6);
-      flash(`sensitivity ${pointer.sensitivity.toFixed(2)}`);
+      saveSensitivity(pointer.sensitivity);
+      flash(`pointer speed ${(pointer.sensitivity * 100).toFixed(0)}%`);
       break;
     case 'arrowleft':
       pointer.sensitivity = clamp(pointer.sensitivity / 1.12, 0.2, 6);
-      flash(`sensitivity ${pointer.sensitivity.toFixed(2)}`);
+      saveSensitivity(pointer.sensitivity);
+      flash(`pointer speed ${(pointer.sensitivity * 100).toFixed(0)}%`);
       break;
     case 'd': $('debug').classList.toggle('on'); break;
     default: break;

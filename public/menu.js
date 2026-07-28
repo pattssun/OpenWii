@@ -1,6 +1,6 @@
 import * as THREE from '/vendor/three/three.module.js';
 import { Pointer } from '/core/pointer.js';
-import { Calibration, loadCalibration, fetchBootId } from '/core/calibration.js';
+import { Calibration, loadCalibration, fetchBootId, saveSensitivity, loadSensitivity } from '/core/calibration.js';
 import { AudioEngine } from '/core/audio.js';
 import { GameLink } from '/core/net.js';
 import { clamp } from '/core/orientation.js';
@@ -378,6 +378,8 @@ scene.add(hand);
 // ── State ──────────────────────────────────────────────────────────────────
 const audio = new AudioEngine();
 const pointer = new Pointer({ mode: 'fusion' });
+// Pointer speed is a remembered preference, not something calibration derives.
+pointer.sensitivity = loadSensitivity() ?? 1;
 let lastSample = null;
 let lastSampleAt = 0;
 let hovered = null;         // tile | arrow | 'wii' | null
@@ -463,6 +465,14 @@ function ensureAudio() {
     if (!ok) { audioStarted = false; return; }
     audio.startMusic();
   });
+}
+
+/** Transient readout so speed changes are visible while adjusting. */
+let speedUntil = 0;
+function showSpeed() {
+  speedUntil = performance.now() + 1600;
+  $('speed').textContent = `Pointer speed ${(pointer.sensitivity * 100).toFixed(0)}%`;
+  $('speed').classList.add('on');
 }
 
 function startCalibration() {
@@ -675,7 +685,13 @@ window.addEventListener('keydown', (e) => {
   ensureAudio();
   if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); pressA(); }
   else if (e.key === 'Escape' || e.key.toLowerCase() === 'b') pressB();
-  else if (e.key.toLowerCase() === 'r') startCalibration();
+  else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+    e.preventDefault();
+    const step = e.key === 'ArrowRight' ? 1.12 : 1 / 1.12;
+    pointer.sensitivity = clamp(pointer.sensitivity * step, 0.2, 6);
+    saveSensitivity(pointer.sensitivity);
+    showSpeed();
+  } else if (e.key.toLowerCase() === 'r') startCalibration();
   else if (e.key.toLowerCase() === 'c') quickRecentre();
   else if (e.key.toLowerCase() === 'd') $('debug').classList.toggle('on');
 });

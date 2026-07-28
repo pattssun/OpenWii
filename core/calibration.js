@@ -78,6 +78,29 @@ export function clearCalibration() {
   try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
 }
 
+/**
+ * Pointer speed is a preference, not a measurement.
+ *
+ * How fast a cursor should feel is genuinely personal, and no amount of
+ * calibration can derive it — so it is tunable live and remembered. Unlike the
+ * calibration frame this is NOT scoped to a server run: a preference that
+ * resets every time you restart the server is not a preference.
+ */
+const SENSITIVITY_KEY = 'openwii.sensitivity.v1';
+
+export function saveSensitivity(v) {
+  try { localStorage.setItem(SENSITIVITY_KEY, String(v)); } catch { /* ignore */ }
+}
+
+export function loadSensitivity() {
+  try {
+    const v = Number(localStorage.getItem(SENSITIVITY_KEY));
+    return Number.isFinite(v) && v > 0 ? clamp(v, 0.2, 6) : null;
+  } catch {
+    return null;
+  }
+}
+
 // Long enough to be a real measurement of the hand's tremor plus the sensor's
 // own noise, not just a couple of samples that happened to agree.
 export const STEADY_MS = 1200;
@@ -235,9 +258,16 @@ export class Calibration {
     // by degrees-per-screen, so a tight mapping magnifies a shaky hand. Hold
     // the floor far enough above the measured noise that tremor stays under
     // roughly 1% of screen width.
-    const noiseFloor = clamp(this.noiseDeg * 90, 25, 60);
-    const spanX = clamp(r.yawMax - r.yawMin, noiseFloor, 80);
-    const spanY = clamp(r.pitchMax - r.pitchMin, noiseFloor * 0.62, 55);
+    // The 90x factor here was set when jitter was the complaint, and it forced
+    // any hand noisier than ~0.7° into a 45°+ mapping — meaning you had to
+    // rotate the phone 45° to cross the screen, which is exhausting and reads
+    // as "slow". Gyro fusion and the motion gate have since removed most of the
+    // jitter this was defending against, so the floor can come down a long way.
+    const noiseFloor = clamp(this.noiseDeg * 55, 20, 50);
+    const hiX = Math.max(noiseFloor, 60);
+    const hiY = Math.max(noiseFloor * 0.62, 40);
+    const spanX = clamp(r.yawMax - r.yawMin, noiseFloor, hiX);
+    const spanY = clamp(r.pitchMax - r.pitchMin, noiseFloor * 0.62, hiY);
 
     // The middle of their swing is the natural neutral — re-zero there rather
     // than wherever their arm happened to stop.
@@ -247,10 +277,10 @@ export class Calibration {
     this.active = false;
     this.done = true;
     this.step = 'done';
-    // 0.75 leaves margin so the corners stay reachable without stretching.
+    // 0.6 leaves margin so the corners stay reachable without stretching.
     this.result = {
-      degPerScreenX: spanX * 0.75,
-      degPerScreenY: spanY * 0.75,
+      degPerScreenX: spanX * 0.6,
+      degPerScreenY: spanY * 0.6,
       grip: this.frame.axis,
       noiseDeg: this.noiseDeg,
     };

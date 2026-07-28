@@ -48,6 +48,13 @@
     position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%);
     font-size: 11px; color: #8494a7; z-index: 10; letter-spacing: .02em;
   }
+  #speed {
+    position: absolute; left: 50%; bottom: 34px; transform: translateX(-50%);
+    font-size: 14px; font-weight: 600; color: #4a5c72; z-index: 11;
+    background: #ffffffe6; border: 1px solid #c9d4e0; border-radius: 999px;
+    padding: 7px 16px; opacity: 0; transition: opacity .2s; pointer-events: none;
+  }
+  #speed.on { opacity: 1; }
   #debug {
     position: absolute; right: 22px; bottom: 22px; margin: 0; display: none; z-index: 10;
     background: #ffffffe6; border: 1px solid #c9d4e0; border-radius: 10px; padding: 12px 14px;
@@ -73,7 +80,8 @@
 
 <div id="link"><span class="dot" id="dot"></span><span id="link-t">no remote connected</span></div>
 
-<div id="keys">Point with your phone · <b>A</b> selects · <b>B</b> back · R recalibrate · D debug</div>
+<div id="keys">Point with your phone · <b>A</b> selects · <b>B</b> back · <b>←→</b> pointer speed · R recalibrate · D debug</div>
+<div id="speed"></div>
 <pre id="debug"></pre>
 
 

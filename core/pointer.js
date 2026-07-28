@@ -298,10 +298,21 @@ export class Pointer {
     let ty;
 
     if (this.mode === 'hybrid' || this.mode === 'fusion') {
-      // Exponential smoothing toward the long-run mean. Using the exact
-      // exponential rather than (dt/tau) keeps the time constant honest even
-      // when packet intervals wobble.
-      const a = 1 - Math.exp(-dt / this.driftTau);
+      /**
+       * Only learn drift while the player is actually moving.
+       *
+       * The estimator assumes a persistent non-zero mean is sensor drift. That
+       * holds while someone is using the pointer, and is badly wrong when they
+       * are holding an aim: it reads the deliberate offset as drift and
+       * subtracts it, so the cursor slides steadily toward the centre of the
+       * screen. Measured, a perfectly steady aim migrated 28% of screen width
+       * in a minute — the cursor visibly refusing to stay where you point it.
+       *
+       * Freezing the estimate while still costs nothing: a stationary sensor
+       * isn't accumulating error worth correcting.
+       */
+      const moving = Math.hypot(this.vel.x, this.vel.y) > this.gateLo;
+      const a = moving ? 1 - Math.exp(-dt / this.driftTau) : 0;
       this.driftYaw += a * (yaw - this.driftYaw);
       this.driftPitch += a * (pitch - this.driftPitch);
       const dy = clamp(this.driftYaw, -this.driftLimit, this.driftLimit);

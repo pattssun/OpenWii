@@ -352,20 +352,46 @@ test('the smoothing filter actually opens up with speed', () => {
 });
 
 // ── Drift correction ───────────────────────────────────────────────────────
-test('hybrid mode absorbs slow sensor drift; absolute mode does not', () => {
+test('a held aim stays exactly where it is pointed', () => {
+  // The drift estimator assumes a persistent non-zero mean is sensor error.
+  // While someone is *holding* an aim that is precisely wrong: it read the
+  // deliberate offset as drift and dragged the cursor toward centre — measured
+  // at 28% of screen width over a minute, which is the cursor visibly refusing
+  // to stay put. It now only learns while the pointer is moving.
+  const p = calibratedPointer(0, 0, 0, { mode: 'fusion' });
+  p.mode = 'fusion';
+  p.recentre();
+  let first = null;
+  for (let i = 0, ms = 0; i <= 60 * 60; i += 1, ms += 1000 / 60) {
+    p.update({ alpha: 15, beta: 0, gamma: 0, motion: { rx: 0, ry: 0, rz: 0 } }, 1 / 60, ms);
+    if (i === 60) first = p.sampleAt(ms).x;
+  }
+  const last = p.sampleAt(60 * 1000).x;
+  assert.ok(Math.abs(last - first) < 0.01,
+    `slid ${(Math.abs(last - first) * 100).toFixed(1)}% of screen over a minute`);
+});
+
+test('drift is still absorbed while the pointer is in use', () => {
+  // The trade for the test above: drift is learned only during movement. That
+  // is the right way round — nobody holds a pointer motionless for minutes, and
+  // if drift does move the cursor you correct it by moving, which re-enables
+  // learning. Here the player waves around while the sensor wanders.
   const run = (mode) => {
     const p = calibratedPointer(0, 0, 0, { mode });
     p.mode = mode;
     p.recentre();
-    const steps = 5 * 60 * 60;                 // 5 minutes at 60Hz
-    for (let i = 0; i < steps; i += 1) {
-      const bias = (i / (60 * 60)) * 2;         // 2°/min of sensor wander
-      p.update({ alpha: -bias, beta: 0, gamma: 0 }, 1 / 60);
+    const steps = 5 * 60 * 60;
+    let ms = 0;
+    for (let i = 0; i < steps; i += 1, ms += 1000 / 60) {
+      const bias = (i / (60 * 60)) * 2;                    // 2°/min of wander
+      const wave = 12 * Math.sin((2 * Math.PI * 0.5 * i) / 60);   // normal use
+      p.update({ alpha: -bias + wave, beta: 0, gamma: 0 }, 1 / 60, ms);
     }
-    return Math.abs(p.position.x - 0.5);
+    // Compare at a moment the wave passes through zero, so only bias remains.
+    return { p, err: Math.abs(p.driftYaw) };
   };
   const hybrid = run('hybrid');
   const absolute = run('absolute');
-  assert.ok(hybrid < 0.05, `hybrid error ${(hybrid * 100).toFixed(2)}% of screen`);
-  assert.ok(absolute > hybrid * 3, `absolute (${(absolute * 100).toFixed(1)}%) drifts far more`);
+  assert.ok(hybrid.err > 1, `hybrid learned the ${hybrid.err.toFixed(1)}° bias`);
+  assert.equal(absolute.p.driftYaw, 0, 'absolute mode learns nothing, by design');
 });
