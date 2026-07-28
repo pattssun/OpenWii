@@ -1,0 +1,16 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "//": "HTTP + mouse only. Browsers block motion sensors on insecure origins, so a PHONE CANNOT WORK with this config. It exists because in-app browser previews can't click through a self-signed cert. For real phone play run `npm start` (HTTPS on :8443).",
+      "name": "fruit-ninja-http-mouse-only",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["start"],
+      "port": 8080,
+      "env": {
+        "HTTP": "1",
+        "PORT": "8080"
+      }
+    }
+  ]
+}

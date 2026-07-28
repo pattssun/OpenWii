@@ -1,0 +1,21 @@
+{
+  "name": "fruit-ninja",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Motion-controlled Fruit Ninja — phone as a wireless sword, PC as the screen.",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "cert": "node scripts/gen-cert.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "qrcode": "^1.5.4",
+    "socket.io": "^4.8.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="theme-color" content="#0b0e14" />
+<title>Sword — fruit-ninja</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: #0b0e14; color: #e8ecf4;
+    font: 500 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    overscroll-behavior: none; touch-action: none; user-select: none;
+  }
+  #app {
+    height: 100%;
+    padding: max(20px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom));
+    display: flex; flex-direction: column; gap: 18px;
+  }
+  h1 { margin: 0; font-size: 22px; letter-spacing: -0.02em; font-weight: 700; }
+  h1 span { opacity: 0.5; font-weight: 500; }
+
+  .card {
+    background: #141926; border: 1px solid #232a3b; border-radius: 16px; padding: 16px;
+  }
+  .muted { color: #8b95ad; font-size: 14px; }
+
+  button {
+    font: inherit; font-weight: 600; color: inherit;
+    border: 1px solid #232a3b; border-radius: 14px; background: #1b2231;
+    padding: 16px; width: 100%; transition: transform .08s ease, background .15s ease;
+  }
+  button:active { transform: scale(0.98); background: #232c40; }
+  button.primary {
+    background: linear-gradient(160deg, #ff5f6d, #d92b4b);
+    border-color: transparent; font-size: 18px; padding: 22px;
+  }
+  button:disabled { opacity: 0.4; }
+
+  .row { display: flex; gap: 10px; }
+  .row > button { flex: 1; }
+
+  #status { display: flex; flex-direction: column; gap: 7px; font-size: 14px; }
+  .line { display: flex; align-items: center; gap: 10px; }
+  #rates { font-size: 12px; font-variant-numeric: tabular-nums; }
+  #diag { border-color: #ff5f6d; background: #26141a; }
+  #diag b { display: block; margin-bottom: 4px; font-size: 15px; }
+  #diag-dump {
+    margin: 12px 0 0; padding: 10px; background: #0b0e14; border-radius: 9px;
+    font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: #8b95ad; white-space: pre-wrap; word-break: break-all;
+    max-height: 190px; overflow: auto; user-select: text; -webkit-user-select: text;
+  }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #4b5468; flex: none; }
+  .dot.on  { background: #35d07f; box-shadow: 0 0 10px #35d07f88; }
+  .dot.err { background: #ff5f6d; }
+
+  /* Live tilt readout — confirms the phone is actually streaming. */
+  #viz { flex: 1; position: relative; min-height: 140px; }
+  #viz canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+  #hz { font-variant-numeric: tabular-nums; }
+
+  /* Calibration banner — lights up while a step is in progress. */
+  #cal { transition: border-color .2s, background .2s; }
+  #cal.active { border-color: #35d07f; background: #14261d; }
+  #cal b { font-size: 17px; display: block; margin-bottom: 3px; }
+  .hide { display: none !important; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; text-align: center; }
+  .grid b { display: block; font-variant-numeric: tabular-nums; font-size: 18px; }
+  .grid span { font-size: 11px; color: #8b95ad; text-transform: uppercase; letter-spacing: .06em; }
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>🗡️ Sword <span>/ fruit-ninja</span></h1>
+
+  <div class="card" id="status">
+    <div class="line">
+      <span class="dot" id="dot-net"></span><span id="net">connecting…</span>
+      <span style="flex:1"></span>
+      <span class="muted" id="hz">0 Hz</span>
+    </div>
+    <div class="muted" id="rates">sensor 0 Hz · sent 0 Hz · offline</div>
+  </div>
+
+  <div class="card hide" id="diag">
+    <b id="diag-title">⚠️ No sensor data</b>
+    <div class="muted" id="diag-body"></div>
+    <pre id="diag-dump"></pre>
+  </div>
+
+  <div id="gate">
+    <button class="primary" id="enable">Enable motion sensors</button>
+    <p class="muted" style="text-align:center">
+      Grant access, then hold the phone like a sword — top edge pointing at the screen.
+    </p>
+  </div>
+
+  <div id="live" class="hide" style="display:flex; flex-direction:column; gap:18px; flex:1;">
+    <div class="card" id="cal">
+      <b id="cal-title">⚔️ Ready</b>
+      <div class="muted" id="cal-body">Swing to slice.</div>
+    </div>
+
+    <div class="card grid">
+      <div><b id="v-yaw">0</b><span>yaw</span></div>
+      <div><b id="v-pitch">0</b><span>pitch</span></div>
+      <div><b id="v-roll">0</b><span>roll</span></div>
+    </div>
+
+    <div id="viz" class="card" style="padding:0; overflow:hidden;"><canvas id="c"></canvas></div>
+
+    <div class="row">
+      <button id="recentre">Re-center</button>
+      <button id="start">Start</button>
+    </div>
+    <button id="calibrate">Recalibrate from scratch</button>
+    <p class="muted" style="text-align:center; margin:0">
+      Re-center re-zeros your neutral pose. Recalibrate also re-measures your swing.
+    </p>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/controller.js"></script>
+</body>
+</html>

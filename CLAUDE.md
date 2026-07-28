@@ -1,4 +1,4 @@
-# Motion-Controlled Fruit Ninja Clone — rebuild
+# fruit-ninja — rebuild
 
 Reverse-engineered from a demo video (ADR-029). Read **SPEC.md** for the breakdown; **PROMPT.md** is the paste-ready kickoff prompt. Build a first version, then Patrick layers his own modifications.
 

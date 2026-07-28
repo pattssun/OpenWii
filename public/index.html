@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>fruit-ninja — motion controlled</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden; cursor: none;
+    background: #0b0e14; color: #e8ecf4;
+    font: 500 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    user-select: none;
+  }
+  canvas { display: block; position: absolute; inset: 0; width: 100%; height: 100%; }
+
+  /* ── HUD ─────────────────────────────────────────────────────────────── */
+  #hud {
+    position: absolute; inset: 0; pointer-events: none;
+    padding: 28px 34px; display: flex; flex-direction: column;
+  }
+  #hud-top { display: flex; align-items: flex-start; gap: 28px; }
+
+  #score { font-size: 56px; font-weight: 800; letter-spacing: -0.03em; line-height: 1;
+           text-shadow: 0 4px 24px #000a; font-variant-numeric: tabular-nums; }
+  #score small { display: block; font-size: 12px; font-weight: 600; letter-spacing: .18em;
+                 text-transform: uppercase; color: #8b95ad; margin-bottom: 6px; }
+  #best { font-size: 13px; color: #8b95ad; margin-top: 8px; font-variant-numeric: tabular-nums; }
+
+  #lives { margin-left: auto; display: flex; gap: 8px; font-size: 30px; }
+  #lives span { opacity: .25; transition: opacity .2s; }
+  #lives span.on { opacity: 1; filter: drop-shadow(0 2px 10px #ff5f6d66); }
+
+  #combo {
+    position: absolute; left: 50%; top: 86px; transform: translateX(-50%);
+    font-size: 30px; font-weight: 800; color: #ffd166; opacity: 0;
+    transition: opacity .18s; text-shadow: 0 3px 20px #000a; white-space: nowrap;
+  }
+  #combo.on { opacity: 1; }
+
+  #link {
+    position: absolute; right: 34px; bottom: 28px; display: flex; align-items: center; gap: 9px;
+    font-size: 13px; color: #8b95ad; background: #141926cc; border: 1px solid #232a3b;
+    padding: 9px 14px; border-radius: 999px; backdrop-filter: blur(8px);
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #4b5468; }
+  .dot.on { background: #35d07f; box-shadow: 0 0 10px #35d07f99; }
+
+  #keys {
+    position: absolute; left: 34px; bottom: 28px; font-size: 12px;
+    color: #59637a; letter-spacing: .02em;
+  }
+  #keys kbd {
+    background: #1b2231; border: 1px solid #2b3448; border-bottom-width: 2px;
+    border-radius: 5px; padding: 1px 6px; font: inherit; font-size: 11px; color: #8b95ad;
+  }
+
+  /* ── Overlays ────────────────────────────────────────────────────────── */
+  #overlay {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    background: radial-gradient(ellipse at 50% 40%, #131a28ee, #0b0e14fa 70%);
+    backdrop-filter: blur(3px); z-index: 5;
+  }
+  #overlay.hide { display: none; }
+  .panel { text-align: center; max-width: 620px; padding: 0 32px; }
+  .panel h1 { font-size: 60px; margin: 0 0 6px; letter-spacing: -0.04em; font-weight: 800; }
+  .panel h1 em { font-style: normal;
+    background: linear-gradient(120deg, #ff5f6d, #ffd166);
+    -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .panel p { color: #8b95ad; margin: 0 auto 26px; max-width: 460px; }
+
+  #pair { display: flex; align-items: center; gap: 26px; justify-content: center;
+          background: #141926; border: 1px solid #232a3b; border-radius: 20px; padding: 22px; }
+  #pair img { width: 168px; height: 168px; border-radius: 12px; background: #fff; }
+  #pair-info { text-align: left; }
+  #pair-info b { display: block; font-size: 15px; margin-bottom: 6px; }
+  #pair-url { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
+              color: #ffd166; word-break: break-all; }
+  #pair-info ol { color: #8b95ad; font-size: 13px; padding-left: 18px; margin: 12px 0 0; }
+  #pair-info li { margin-bottom: 3px; }
+
+  .cta { margin-top: 26px; font-size: 14px; color: #59637a; }
+  .cta strong { color: #e8ecf4; }
+  #final { font-size: 22px; color: #e8ecf4; margin-bottom: 8px; }
+  #final b { color: #ffd166; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud">
+  <div id="hud-top">
+    <div>
+      <div id="score"><small>Score</small><span id="score-v">0</span></div>
+      <div id="best">Best 0</div>
+    </div>
+    <div id="lives"><span>❌</span><span>❌</span><span>❌</span></div>
+  </div>
+  <div id="combo"></div>
+  <div id="keys">
+    <kbd>Space</kbd> start &nbsp; <kbd>R</kbd> recalibrate &nbsp; <kbd>C</kbd> re-center &nbsp;
+    <kbd>M</kbd> mapping &nbsp; <kbd>←→</kbd> sensitivity &nbsp; <kbd>D</kbd> debug
+  </div>
+  <div id="link"><span class="dot" id="dot"></span><span id="link-t">no sword connected</span></div>
+</div>
+
+<div id="overlay">
+  <div class="panel" id="panel">
+    <h1>🍉 <em>Fruit Ninja</em></h1>
+    <p>Your phone is the sword. Swing it in the air — the blade on this screen follows.</p>
+    <div id="pair">
+      <img id="pair-qr" alt="Pairing QR code" />
+      <div id="pair-info">
+        <b>Scan with your phone</b>
+        <div id="pair-url">…</div>
+        <ol>
+          <li>Same Wi-Fi as this computer</li>
+          <li>Accept the certificate warning</li>
+          <li>Tap <strong>Enable motion sensors</strong></li>
+        </ol>
+      </div>
+    </div>
+    <div class="cta" id="cta">Waiting for a controller… press <strong>Space</strong> to play with the mouse.</div>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/game.js"></script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-# Motion-Controlled Fruit Ninja Clone — rebuild spec
+# fruit-ninja — rebuild spec
 
 > A web-based Fruit Ninja clone that uses a smartphone as a wireless motion controller.
 

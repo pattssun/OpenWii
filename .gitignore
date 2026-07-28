@@ -1,0 +1,4 @@
+node_modules/
+certs/
+.DS_Store
+npm-debug.log*
