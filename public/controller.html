@@ -64,6 +64,16 @@
 
   #hz { font-variant-numeric: tabular-nums; }
 
+  /* Face buttons — big enough to hit without looking at the phone. */
+  .pad { display: flex; gap: 14px; align-items: stretch; }
+  .face {
+    flex: 1; font-size: 30px; font-weight: 800; padding: 26px 0;
+    border-radius: 22px; border: 1px solid #2b3448;
+  }
+  .face.a { flex: 1.7; background: linear-gradient(160deg, #2f6fe4, #1d47a0); border-color: transparent; }
+  .face.b { background: #1b2231; color: #8b95ad; }
+  .face:active { transform: scale(0.96); filter: brightness(1.15); }
+
   /* Calibration banner — lights up while a step is in progress. */
   #cal { transition: border-color .2s, background .2s; }
   #cal.active { border-color: #35d07f; background: #14261d; }
@@ -115,13 +125,20 @@
 
     <div id="viz" class="card" style="padding:0; overflow:hidden;"><canvas id="c"></canvas></div>
 
+    <!-- A and B are the remote's real buttons: everything on screen is
+         reachable with them, so the PC keyboard is never required. -->
+    <div class="pad">
+      <button id="btn-b" class="face b">B</button>
+      <button id="btn-a" class="face a">A</button>
+    </div>
+
     <div class="row">
       <button id="recentre">Re-center</button>
-      <button id="start">Start</button>
+      <button id="calibrate">Recalibrate</button>
     </div>
-    <button id="calibrate">Recalibrate from scratch</button>
     <p class="muted" style="text-align:center; margin:0">
-      Re-center re-zeros your neutral pose. Recalibrate also re-measures your swing.
+      <strong>A</strong> selects · <strong>B</strong> goes back.
+      Re-center re-zeros your neutral pose.
     </p>
   </div>
 </div>

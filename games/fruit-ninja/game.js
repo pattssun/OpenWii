@@ -1,7 +1,7 @@
 import * as THREE from '/vendor/three/three.module.js';
 import { FruitNinja, FIELD_H } from './logic.js';
 import { Pointer } from '../../core/pointer.js';
-import { Calibration } from '../../core/calibration.js';
+import { Calibration, loadCalibration } from '../../core/calibration.js';
 import { AudioEngine } from '../../core/audio.js';
 import { GameLink } from '../../core/net.js';
 import { clamp } from '../../core/orientation.js';
@@ -264,6 +264,15 @@ const calibration = new Calibration({
   },
 });
 
+// Inherit the menu's calibration. Without this, launching a channel would ask
+// the player to hold still and swing again every single time.
+const savedCalibration = loadCalibration();
+if (savedCalibration) {
+  const result = calibration.restore(savedCalibration);
+  pointer.setFrame(calibration.frame);
+  if (result) pointer.applyCalibration(result);
+}
+
 function resize() {
   const w = Math.max(1, window.innerWidth);
   const h = Math.max(1, window.innerHeight);
@@ -302,6 +311,9 @@ const link = new GameLink({
     if (cmd.type === 'calibrate') beginCalibration();
     else if (cmd.type === 'recentre') quickRecentre();
     else if (cmd.type === 'start') beginPlay();
+    else if (cmd.type === 'button' && cmd.button === 'A') beginPlay();
+    // B returns to the menu, so the whole loop is reachable from the phone.
+    else if (cmd.type === 'button' && cmd.button === 'B') window.location.href = '/';
   },
   onPresence: ({ controller }) => {
     const on = controller > 0;

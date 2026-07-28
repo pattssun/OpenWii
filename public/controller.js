@@ -16,7 +16,8 @@ const $ = (id) => document.getElementById(id);
 const els = {
   net: $('net'), dotNet: $('dot-net'), hz: $('hz'),
   gate: $('gate'), live: $('live'), enable: $('enable'),
-  calibrate: $('calibrate'), start: $('start'), recentre: $('recentre'),
+  calibrate: $("calibrate"), recentre: $("recentre"),
+  btnA: $("btn-a"), btnB: $("btn-b"),
   yaw: $('v-yaw'), pitch: $('v-pitch'), roll: $('v-roll'),
   canvas: $('c'), cal: $('cal'), calTitle: $('cal-title'), calBody: $('cal-body'),
   rates: $('rates'), diag: $('diag'), diagBody: $('diag-body'),
@@ -305,7 +306,16 @@ els.enable.addEventListener('click', async () => {
 
 els.calibrate.addEventListener('click', () => socket.emit('command', { type: 'calibrate' }));
 els.recentre.addEventListener('click', () => socket.emit('command', { type: 'recentre' }));
-els.start.addEventListener('click', () => socket.emit('command', { type: 'start' }));
+
+// A and B. Sent on pointerdown rather than click so the press lands as soon as
+// the finger does — a click waits for release, which reads as lag on a remote.
+for (const [el, button] of [[els.btnA, 'A'], [els.btnB, 'B']]) {
+  el.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    socket.emit('command', { type: 'button', button });
+    if (navigator.vibrate) navigator.vibrate(10);
+  });
+}
 
 /** Stop the screen sleeping mid-game; the phone gets no touch input while swinging. */
 async function keepAwake() {

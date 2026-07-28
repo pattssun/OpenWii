@@ -125,11 +125,41 @@ Judged on fidelity. A 12-point checklist, all of which must be present:
 11. Back navigation, with its own sound
 12. Page arrows
 
-**Acceptance**
-- 12 / 12 checklist items present.
-- O5 — the whole flow is keyboard-free.
-- O6 — 60 fps sustained in the menu.
-- Every interactive element has an audio cue. No silent interactions.
+**Acceptance — met 2026-07-28.**
+
+| # | Item | Result |
+|---|---|---|
+| 1 | Health & Safety on boot, dismissed with A | ✅ |
+| 2 | 4×3 grid of rounded channel tiles | ✅ 12 tiles |
+| 3 | Idle wobble | ✅ per-tile phase, out of sync |
+| 4 | Hover highlight | ✅ lifts 0.59 units, scales 1.07× |
+| 5 | Hover sound | ✅ |
+| 6 | Zoom-to-fill on select | ✅ 5.9× scale, then navigates |
+| 7 | Bottom bar | ✅ |
+| 8 | Wii button, pulsing + hoverable | ✅ |
+| 9 | Live clock and date | ✅ redrawn 5×/sec |
+| 10 | Seamlessly looping menu music | ✅ scheduler runs, audio clock advances |
+| 11 | Back navigation with its own sound | ✅ |
+| 12 | Page arrows | ✅ present, disabled on a single page |
+
+**13/13** including the select cue. Also met:
+- **O5 keyboard-free** — A and B on the phone drive boot dismissal, channel
+  select, and return-to-menu. Calibration persists to `localStorage`, so
+  launching a channel no longer re-runs the hold-still/swing flow; verified by
+  loading the game directly and finding it already calibrated.
+- **O6** — **0.066 ms/frame** in the menu (251× headroom), 16 draw calls.
+- Every interactive element has a cue: hover, select, back, channel-open, boot,
+  pointer-connect.
+
+Two notes on how this was verified. The preview harness throttles
+`requestAnimationFrame`, so the render loop was split into a `step(now, dt)`
+function the test drives directly — cadence can't be observed there, behaviour
+can. And an early run reported the music failing; that was a synchronous check
+racing the async `AudioContext.unlock()`, not the music.
+
+The Health & Safety screen and the calibration prompts are DOM rather than
+canvas textures. Both are walls of text where crisp type matters more than
+living in the same renderer, and neither is part of the menu proper.
 
 ---
 

@@ -3,131 +3,122 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>OpenWii — your phone is the remote</title>
+<title>OpenWii</title>
 <style>
   * { box-sizing: border-box; }
   html, body {
-    margin: 0; min-height: 100%;
-    background: #0b0e14; color: #e8ecf4;
+    margin: 0; height: 100%; overflow: hidden; cursor: none;
+    background: #e4eaf1; color: #33404f;
     font: 500 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    user-select: none;
   }
-  body {
-    background: radial-gradient(ellipse at 50% 0%, #1a2233, #0b0e14 65%);
-    padding: 64px 32px 80px; display: flex; flex-direction: column; align-items: center;
-  }
-  header { text-align: center; margin-bottom: 44px; }
-  h1 { font-size: 62px; margin: 0 0 8px; letter-spacing: -0.045em; font-weight: 800; }
-  h1 em { font-style: normal;
-    background: linear-gradient(120deg, #ff5f6d, #ffd166);
-    -webkit-background-clip: text; background-clip: text; color: transparent; }
-  header p { color: #8b95ad; margin: 0; font-size: 17px; }
+  canvas { display: block; position: absolute; inset: 0; width: 100%; height: 100%; }
 
-  /* Pairing: one remote, shared by every game — so it lives on the launcher. */
+  /* ── Health & Safety ─────────────────────────────────────────────────── */
+  /* DOM rather than a canvas texture: it's a wall of legal text, and crisp
+     type beats a texture that has to be re-rendered on every resize. */
+  #boot {
+    position: absolute; inset: 0; z-index: 20; background: #fff;
+    display: grid; place-items: center; padding: 6vh 8vw;
+    transition: opacity .55s ease;
+  }
+  #boot.gone { opacity: 0; pointer-events: none; }
+  #boot-inner { max-width: 760px; text-align: center; }
+  #boot h1 {
+    font-size: clamp(20px, 3vw, 34px); margin: 0 0 28px; letter-spacing: -0.01em;
+    display: flex; align-items: center; justify-content: center; gap: 14px;
+  }
+  #boot .tri { color: #d33; font-size: 1.25em; }
+  #boot p { font-size: clamp(13px, 1.3vw, 16px); line-height: 1.8; color: #4b5a6b; margin: 0 0 18px; }
+  #boot .press {
+    margin-top: 42px; font-size: 15px; color: #7a8b9e;
+    animation: blink 1.6s ease-in-out infinite;
+  }
+  #boot .press b {
+    display: inline-grid; place-items: center; width: 30px; height: 30px;
+    border-radius: 50%; background: #2f6fe4; color: #fff; margin: 0 5px;
+    vertical-align: middle; font-size: 15px;
+  }
+  @keyframes blink { 0%, 100% { opacity: 1 } 50% { opacity: .45 } }
+
+  /* ── Calibration ─────────────────────────────────────────────────────── */
+  #cal {
+    position: absolute; inset: 0; z-index: 15; display: grid; place-items: center;
+    background: rgba(240, 244, 249, 0.93); text-align: center; padding: 0 8vw;
+  }
+  #cal.hide { display: none; }
+  #cal h2 { font-size: clamp(26px, 3.6vw, 44px); margin: 0 0 10px; letter-spacing: -0.03em; }
+  #cal p { color: #64758a; margin: 0 auto; max-width: 520px; }
+
+  /* ── Chrome ──────────────────────────────────────────────────────────── */
+  #link {
+    position: absolute; right: 22px; top: 20px; display: flex; align-items: center; gap: 9px;
+    font-size: 12px; color: #6b7b8f; background: #ffffffcc; border: 1px solid #c9d4e0;
+    padding: 8px 13px; border-radius: 999px; z-index: 10;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #b6c2d0; }
+  .dot.on { background: #35d07f; }
+
   #pair {
-    display: flex; align-items: center; gap: 26px;
-    background: #141926; border: 1px solid #232a3b; border-radius: 20px;
-    padding: 22px; margin-bottom: 46px; max-width: 620px;
+    position: absolute; left: 22px; top: 20px; z-index: 10; display: flex; gap: 12px;
+    align-items: center; background: #ffffffcc; border: 1px solid #c9d4e0;
+    border-radius: 16px; padding: 11px 15px 11px 11px;
   }
-  #pair img { width: 156px; height: 156px; border-radius: 12px; background: #fff; flex: none; }
-  #pair b { display: block; font-size: 15px; margin-bottom: 6px; }
-  #pair-url {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
-    color: #ffd166; word-break: break-all;
-  }
-  #pair ol { color: #8b95ad; font-size: 13px; padding-left: 18px; margin: 12px 0 0; }
-  #pair li { margin-bottom: 3px; }
+  #pair img { width: 62px; height: 62px; border-radius: 8px; background: #fff; }
+  #pair b { display: block; font-size: 11px; margin-bottom: 3px; }
+  #pair-url { font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: #7a8b9e; }
+  #pair { transition: opacity .4s ease, transform .4s ease; }
+  #pair.gone { opacity: 0; transform: translateY(-8px); pointer-events: none; }
 
-  h2 {
-    font-size: 12px; font-weight: 700; letter-spacing: .18em; text-transform: uppercase;
-    color: #59637a; margin: 0 0 16px; align-self: flex-start; max-width: 900px; width: 100%;
+  #keys {
+    position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%);
+    font-size: 11px; color: #8494a7; z-index: 10; letter-spacing: .02em;
   }
-  #games {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 16px; width: 100%; max-width: 900px;
+  #debug {
+    position: absolute; right: 22px; bottom: 22px; margin: 0; display: none; z-index: 10;
+    background: #ffffffe6; border: 1px solid #c9d4e0; border-radius: 10px; padding: 12px 14px;
+    font: 11px/1.6 ui-monospace, Menlo, monospace; color: #5c6e83; white-space: pre;
   }
-  .game {
-    display: block; text-decoration: none; color: inherit;
-    background: #141926; border: 1px solid #232a3b; border-radius: 18px; padding: 24px;
-    transition: transform .12s ease, border-color .15s ease, background .15s ease;
-  }
-  .game:hover { transform: translateY(-3px); border-color: #ff5f6d66; background: #171d2c; }
-  .game .emoji { font-size: 40px; display: block; margin-bottom: 12px; }
-  .game b { font-size: 19px; display: block; margin-bottom: 5px; letter-spacing: -0.02em; }
-  .game span { color: #8b95ad; font-size: 14px; }
-  .empty { color: #59637a; font-size: 14px; }
-
-  footer { margin-top: 56px; color: #59637a; font-size: 13px; text-align: center; }
-  footer code {
-    background: #141926; border: 1px solid #232a3b; border-radius: 5px;
-    padding: 2px 7px; font-size: 12px; color: #8b95ad;
-  }
+  #debug.on { display: block; }
 </style>
 </head>
 <body>
-  <header>
-    <h1>🕹 <em>OpenWii</em></h1>
-    <p>Motion-controlled games for your computer. Your phone is the remote.</p>
-  </header>
+<canvas id="scene"></canvas>
 
-  <div id="pair">
-    <img id="pair-qr" alt="Pairing QR code" />
-    <div>
-      <b>Pair your phone</b>
-      <div id="pair-url">…</div>
-      <ol>
-        <li>Same Wi-Fi as this computer</li>
-        <li>Accept the certificate warning</li>
-        <li>Tap <strong>Enable motion sensors</strong></li>
-      </ol>
-    </div>
+<div id="cal" class="hide">
+  <div>
+    <h2 id="cal-title">Waiting for the remote</h2>
+    <p id="cal-body">Open the controller page on your phone and tap Enable motion sensors.</p>
   </div>
+</div>
 
-  <h2>Games</h2>
-  <div id="games"><span class="empty">Loading…</span></div>
+<div id="pair">
+  <img id="pair-qr" alt="Pairing QR code" />
+  <div><b>Pair your phone</b><div id="pair-url">…</div></div>
+</div>
 
-  <footer>
-    Add a game by dropping a folder with an <code>index.html</code> into <code>games/</code>.
-  </footer>
+<div id="link"><span class="dot" id="dot"></span><span id="link-t">no remote connected</span></div>
 
-<script>
-  fetch('/api/pairing')
-    .then((r) => r.json())
-    .then(({ url, qr }) => {
-      document.getElementById('pair-qr').src = qr;
-      document.getElementById('pair-url').textContent = url;
-    })
-    .catch(() => {
-      document.getElementById('pair-url').textContent = 'open /controller on your phone';
-    });
+<div id="keys">Point with your phone · <b>A</b> selects · <b>B</b> back · R recalibrate · D debug</div>
+<pre id="debug"></pre>
 
-  fetch('/api/games')
-    .then((r) => r.json())
-    .then((games) => {
-      const host = document.getElementById('games');
-      if (!games.length) {
-        host.innerHTML = '<span class="empty">No games found in games/.</span>';
-        return;
-      }
-      host.innerHTML = '';
-      for (const g of games) {
-        const a = document.createElement('a');
-        a.className = 'game';
-        a.href = g.url;
-        // textContent throughout: game.json is author-supplied, not markup.
-        const emoji = document.createElement('span');
-        emoji.className = 'emoji';
-        emoji.textContent = g.emoji;
-        const title = document.createElement('b');
-        title.textContent = g.title;
-        const tagline = document.createElement('span');
-        tagline.textContent = g.tagline;
-        a.append(emoji, title, tagline);
-        host.append(a);
-      }
-    })
-    .catch(() => {
-      document.getElementById('games').innerHTML = '<span class="empty">Could not load games.</span>';
-    });
-</script>
+<div id="boot">
+  <div id="boot-inner">
+    <h1><span class="tri">⚠</span> WARNING — HEALTH AND SAFETY</h1>
+    <p>
+      BEFORE PLAYING, READ YOUR OPERATIONS MANUAL FOR IMPORTANT INFORMATION
+      ABOUT YOUR HEALTH AND SAFETY.
+    </p>
+    <p>
+      Make sure you have enough room to swing freely, and keep a firm grip on
+      your phone. It has no wrist strap, and your television is closer than you
+      think.
+    </p>
+    <div class="press">Press <b>A</b> to continue</div>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script type="module" src="menu.js"></script>
 </body>
 </html>

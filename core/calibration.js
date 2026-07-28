@@ -24,6 +24,42 @@ import {
  *      at the centre of it.
  */
 
+/**
+ * Calibration persists across pages.
+ *
+ * Each channel is its own document, so without this the player would be asked
+ * to hold still and swing again every single time they opened a game — which
+ * would make the keyboard-free menu→game→menu loop miserable. Calibrate once at
+ * the menu; every channel inherits it.
+ */
+const STORAGE_KEY = 'openwii.calibration.v1';
+
+export function saveCalibration(frame, result) {
+  if (!frame) return;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ frame, result, at: Date.now() }));
+  } catch { /* private browsing, quota — not fatal */ }
+}
+
+export function loadCalibration({ maxAgeMs = 12 * 60 * 60 * 1000 } = {}) {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const saved = JSON.parse(raw);
+    if (!saved.frame || !saved.frame.f) return null;
+    // A stale frame is worse than none: the player has almost certainly moved,
+    // and a wrong neutral pose is confusing in a way "please calibrate" is not.
+    if (Date.now() - (saved.at || 0) > maxAgeMs) return null;
+    return saved;
+  } catch {
+    return null;
+  }
+}
+
+export function clearCalibration() {
+  try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
+}
+
 export const STEADY_MS = 700;
 const STEADY_KEEP_MS = STEADY_MS * 1.6;
 const STEADY_GIVE_UP_MS = 6000;
@@ -161,6 +197,7 @@ export class Calibration {
     this.step = 'done';
     // 0.9 leaves a margin so the screen corners stay comfortably reachable.
     this.result = { degPerScreenX: spanX * 0.9, degPerScreenY: spanY * 0.9, grip: this.frame.axis };
+    saveCalibration(this.frame, this.result);
     this.onStep('done');
     this.onDone(this.result);
   }
@@ -170,7 +207,19 @@ export class Calibration {
     const built = buildFrame(axesFromSample(sample));
     if (!built) return false;
     this.frame = built;
+    saveCalibration(this.frame, this.result);
     return true;
+  }
+
+  /** Adopt a frame saved by an earlier page. Returns the stored result. */
+  restore(saved) {
+    if (!saved || !saved.frame) return null;
+    this.frame = saved.frame;
+    this.done = true;
+    this.active = false;
+    this.step = 'done';
+    this.result = saved.result || null;
+    return this.result;
   }
 
   /** Adopt whatever we have and stop, for a player who skips the flow. */
