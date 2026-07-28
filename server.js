@@ -28,6 +28,12 @@ const GAMES_DIR = path.join(__dirname, 'games');
 const app = express();
 app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
 app.use('/games', express.static(GAMES_DIR, { extensions: ['html'] }));
+// The shared motion engine, imported directly by games as ES modules.
+app.use('/core', express.static(path.join(__dirname, 'core')));
+// Three.js straight from node_modules — no build step, no bundler.
+app.use('/vendor/three', express.static(path.join(__dirname, 'node_modules', 'three', 'build')));
+// Optional audio overrides. Gitignored: nothing copyrighted ships by default.
+app.use('/audio', express.static(path.join(__dirname, 'audio'), { fallthrough: true }));
 
 /**
  * Discover games from disk rather than a hardcoded list: a game is any folder
@@ -94,8 +100,34 @@ function countOf(role) {
   return n;
 }
 
+/**
+ * Player slots. Only slot 0 is used today, but tagging every packet with its
+ * slot from the start means adding a second phone later is a feature, not a
+ * protocol migration.
+ */
+const MAX_PLAYERS = 4;
+const slots = new Array(MAX_PLAYERS).fill(null);   // index → socket.id
+
+function assignSlot(socketId) {
+  const free = slots.indexOf(null);
+  if (free === -1) return -1;
+  slots[free] = socketId;
+  return free;
+}
+
+function releaseSlot(socketId) {
+  const i = slots.indexOf(socketId);
+  if (i !== -1) slots[i] = null;
+}
+
+const slotOf = (socketId) => slots.indexOf(socketId);
+
 function broadcastPresence() {
-  io.emit('presence', { game: countOf('game'), controller: countOf('controller') });
+  io.emit('presence', {
+    game: countOf('game'),
+    controller: countOf('controller'),
+    slots: slots.map((id, i) => ({ slot: i, occupied: id !== null })),
+  });
 }
 
 io.on('connection', (socket) => {
@@ -103,9 +135,26 @@ io.on('connection', (socket) => {
     if (role !== 'game' && role !== 'controller') return;
     roles.set(socket.id, role);
     socket.join(role);
-    console.log(`[io] ${role} connected (${socket.id})`);
+
+    if (role === 'controller') {
+      const slot = assignSlot(socket.id);
+      if (slot === -1) {
+        socket.emit('slot-denied', { reason: 'all player slots full', max: MAX_PLAYERS });
+        console.log(`[io] controller rejected — ${MAX_PLAYERS} slots full (${socket.id})`);
+        return;
+      }
+      socket.emit('slot', { slot });
+      console.log(`[io] controller connected as player ${slot + 1} (${socket.id})`);
+    } else {
+      console.log(`[io] game connected (${socket.id})`);
+    }
     broadcastPresence();
   });
+
+  // Latency probe. Echoed straight back so the game can measure a true round
+  // trip — a one-way timestamp would need synchronised clocks across devices.
+  socket.on('ping-probe', (data) => socket.to('controller').emit('ping-probe', data));
+  socket.on('pong-probe', (data) => socket.to('game').emit('pong-probe', data));
 
   // Phone → PC.
   //
@@ -117,19 +166,19 @@ io.on('connection', (socket) => {
   // connects, commands work, and the blade simply never moves. The payload is
   // ~100 bytes at 60Hz; the rate cap on the sender is the real backpressure.
   socket.on('orientation', (data) => {
-    socket.to('game').emit('orientation', data);
+    socket.to('game').emit('orientation', { ...data, slot: slotOf(socket.id) });
   });
 
   socket.on('motion', (data) => {
-    socket.to('game').emit('motion', data);
+    socket.to('game').emit('motion', { ...data, slot: slotOf(socket.id) });
   });
 
   // Phone → PC control actions: calibrate, start, pause, sensitivity nudges.
   socket.on('command', (data) => {
-    socket.to('game').emit('command', data);
+    socket.to('game').emit('command', { ...data, slot: slotOf(socket.id) });
   });
 
-  // PC → phone feedback: slice hits (haptics), score, game state.
+  // PC → phone feedback: hits (haptics), score, game state.
   socket.on('feedback', (data) => {
     socket.to('controller').emit('feedback', data);
   });
@@ -137,6 +186,7 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     const role = roles.get(socket.id);
     roles.delete(socket.id);
+    releaseSlot(socket.id);
     if (role) console.log(`[io] ${role} disconnected (${socket.id})`);
     broadcastPresence();
   });

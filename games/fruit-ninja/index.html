@@ -50,6 +50,20 @@
     position: absolute; left: 34px; bottom: 28px; font-size: 12px;
     color: #59637a; letter-spacing: .02em;
   }
+  #toast {
+    position: absolute; left: 50%; bottom: 78px; transform: translateX(-50%);
+    font-size: 13px; font-weight: 600; letter-spacing: .1em; color: #8b95ad;
+    opacity: 0; transition: opacity .25s; white-space: nowrap;
+  }
+  #toast.on { opacity: 1; }
+  #debug {
+    position: absolute; right: 34px; top: 92px; margin: 0; display: none;
+    background: #0b0e14dd; border: 1px solid #232a3b; border-radius: 12px;
+    padding: 14px 16px; font: 12px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: #8b95ad; white-space: pre;
+  }
+  #debug.on { display: block; }
+
   #keys a { color: #8b95ad; text-decoration: none; pointer-events: auto; }
   #keys a:hover { color: #e8ecf4; }
   #keys kbd {
@@ -104,7 +118,9 @@
     <kbd>Space</kbd> start &nbsp; <kbd>R</kbd> recalibrate &nbsp; <kbd>C</kbd> re-center &nbsp;
     <kbd>M</kbd> mapping &nbsp; <kbd>←→</kbd> sensitivity &nbsp; <kbd>D</kbd> debug
   </div>
-  <div id="link"><span class="dot" id="dot"></span><span id="link-t">no sword connected</span></div>
+  <div id="link"><span class="dot" id="dot"></span><span id="link-t">no remote connected</span></div>
+  <div id="toast"></div>
+  <pre id="debug"></pre>
 </div>
 
 <div id="overlay">
@@ -128,6 +144,6 @@
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
-<script src="game.js"></script>
+<script type="module" src="game.js"></script>
 </body>
 </html>

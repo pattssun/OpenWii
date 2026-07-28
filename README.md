@@ -76,10 +76,24 @@ once there's real evidence about which parts generalise.
 ```
 server.js              Express + Socket.io relay. Holds no game state.
 scripts/gen-cert.js    Self-signed cert with your LAN IP in the SANs.
+core/                  The motion engine. Renderer- and game-agnostic.
+  orientation.js         phone attitude → world-space body axes
+  calibration.js         grip detection, neutral pose, swing range
+  pointer.js             mapping modes incl. hybrid drift correction
+  filter.js  trail.js    One Euro filter, gesture history + speed
+  audio.js               synthesized cues with file override
+  net.js                 relay client, player slots, latency probe
 public/index.html      Launcher: pairing QR + game list.
 public/controller.*    The remote. Shared by every game.
 games/<slug>/          One folder per game, auto-discovered.
+  logic.js               pure game logic — testable in Node
+  game.js                Three.js renderer
 ```
+
+Run `npm test` for the suite: 9 core regressions covering the documented bugs,
+plus 8 game mechanics tests. Game logic is kept free of Three.js and the DOM
+precisely so it can be tested headlessly rather than by evaluating JavaScript in
+a browser tab.
 
 The server is a dumb switchboard — `orientation` and `motion` go phone→PC,
 `command` (calibrate/start) goes phone→PC, `feedback` (slice/bomb/miss) goes

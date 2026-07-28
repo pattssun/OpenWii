@@ -2,3 +2,6 @@ node_modules/
 certs/
 .DS_Store
 npm-debug.log*
+
+# Optional audio overrides — never ship copyrighted audio.
+audio/

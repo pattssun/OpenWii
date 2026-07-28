@@ -8,12 +8,14 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "cert": "node scripts/gen-cert.js"
+    "cert": "node scripts/gen-cert.js",
+    "test": "node --test \"core/**/*.test.mjs\" \"games/**/*.test.mjs\""
   },
   "dependencies": {
     "express": "^4.21.2",
     "qrcode": "^1.5.4",
-    "socket.io": "^4.8.1"
+    "socket.io": "^4.8.1",
+    "three": "^0.185.1"
   },
   "engines": {
     "node": ">=18"

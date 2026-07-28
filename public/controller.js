@@ -20,6 +20,7 @@ const els = {
   yaw: $('v-yaw'), pitch: $('v-pitch'), roll: $('v-roll'),
   canvas: $('c'), cal: $('cal'), calTitle: $('cal-title'), calBody: $('cal-body'),
   rates: $('rates'), diag: $('diag'), diagBody: $('diag-body'),
+  player: $("player"),
   diagTitle: $('diag-title'), diagDump: $('diag-dump'),
 };
 
@@ -45,13 +46,27 @@ socket.on('presence', ({ game }) => {
   setNet(gameConnected ? 'linked to PC' : 'waiting for PC…', gameConnected ? 'on' : '');
 });
 
+// Latency probe — echo straight back. The PC times the round trip, because a
+// one-way timestamp would need the two devices' clocks to agree, and they don't.
+socket.on('ping-probe', ({ id }) => socket.emit('pong-probe', { id }));
+
+let playerSlot = 0;
+socket.on('slot', ({ slot }) => {
+  playerSlot = slot;
+  els.player.textContent = `Player ${slot + 1}`;
+  els.player.classList.remove('hide');
+});
+socket.on('slot-denied', ({ max }) => {
+  setNet(`all ${max} player slots are full`, 'err');
+});
+
 // Calibration prompts mirrored from the PC — you're holding the phone, not
 // looking at the monitor, so the instructions have to be here too.
 const CAL_COPY = {
   signal: ['📡 Connecting', 'Waiting for sensor data…'],
   steady: ['🧍 Hold still', 'Grip it how you like, point it at the screen.'],
   range: ['🌀 Swing it around', 'Big sweeps — side to side, then up and down.'],
-  done: ['⚔️ Ready', 'Swing to slice.'],
+  done: ['🎮 Ready', 'Point and swing.'],
 };
 
 function showCalibration(step) {
