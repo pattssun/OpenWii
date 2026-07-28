@@ -126,6 +126,38 @@ test('both sample representations drive the pointer identically', () => {
   assert.ok(Math.abs(results[0].y - results[1].y) < 1e-6, 'y matches');
 });
 
+// ── Responsiveness ─────────────────────────────────────────────────────────
+test('the cursor keeps up with a moving hand', () => {
+  // The symptom of over-smoothing is tracking error: how far behind the true
+  // aim the cursor sits mid-sweep. With the old constants this reached 25% of
+  // the screen — a quarter of the display behind your hand, which reads as
+  // both "slow" and "imprecise", since the lag makes you overshoot.
+  //
+  // A step-response test would NOT catch this: One Euro initialises to its
+  // first sample, so a fresh filter appears to settle instantly.
+  const p = calibratedPointer(0, 0, 0, { mode: 'absolute' });
+  p.mode = 'absolute';
+  p.recentre();
+  let worst = 0;
+  for (let f = 0; f < 60; f += 1) {
+    const yaw = -25 * Math.sin((f / 60) * Math.PI * 2);   // one sweep per second
+    p.update({ alpha: yaw, beta: 0, gamma: 0 }, 1 / 60);
+    worst = Math.max(worst, Math.abs(p.position.x - (0.5 + -yaw / 60)));
+  }
+  assert.ok(worst < 0.08, `worst tracking error ${(worst * 100).toFixed(1)}% of screen`);
+});
+
+test('the smoothing filter actually opens up with speed', () => {
+  // `cutoff = minCutoff + beta*|speed|` makes beta unit-dependent. When the
+  // pointer moved from pixels to normalised units, beta kept its pixel-era
+  // value and the adaptive term collapsed to nothing — leaving a fixed low-pass
+  // that lagged at every speed. This pins the adaptation to real units.
+  const p = new Pointer({});
+  const slow = p.filterX.minCutoff + p.filterX.beta * 0.1;   // 0.1 screens/sec
+  const fast = p.filterX.minCutoff + p.filterX.beta * 3;     // 3 screens/sec
+  assert.ok(fast > slow * 3, `cutoff opens ${slow.toFixed(1)}Hz → ${fast.toFixed(1)}Hz`);
+});
+
 // ── Drift correction ───────────────────────────────────────────────────────
 test('hybrid mode absorbs slow sensor drift; absolute mode does not', () => {
   const run = (mode) => {

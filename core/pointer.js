@@ -59,8 +59,24 @@ export class Pointer {
      */
     this.aim = { x: 0.5, y: 0.5 };            // normalised 0..1
     this.position = { x: 0.5, y: 0.5 };
-    this.filterX = new OneEuro(1.6, 0.012);
-    this.filterY = new OneEuro(1.6, 0.012);
+
+    /**
+     * Smoothing.
+     *
+     * One Euro adapts as `cutoff = minCutoff + beta·|speed|`, so **beta is
+     * unit-dependent**. These filters used to run in pixels, where a fast swing
+     * gave speeds in the thousands and beta=0.012 opened the cutoff up to ~37Hz.
+     * Working in normalised 0..1 units shrank speed by a factor of the screen
+     * width, which silently collapsed the adaptive term to nothing — leaving a
+     * fixed 1.6Hz low-pass with ~250ms of settling lag at every speed. That
+     * reads exactly as "slow and imprecise": the cursor trails your hand, and
+     * the lag makes you overshoot every target.
+     *
+     * beta is now scaled for normalised units, and minCutoff raised so the
+     * resting case settles in ~80ms rather than ~250ms.
+     */
+    this.filterX = new OneEuro(options.minCutoff ?? 6, options.beta ?? 12);
+    this.filterY = new OneEuro(options.minCutoff ?? 6, options.beta ?? 12);
 
     this.angles = { yaw: 0, pitch: 0 };
     this.live = false;

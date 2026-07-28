@@ -62,6 +62,14 @@ function listGames() {
 
 app.get('/api/games', (_req, res) => res.json(listGames()));
 
+/**
+ * A fresh id per server run. Clients tie their saved calibration to it, so
+ * calibration happens once when you `npm start` and is then inherited by every
+ * page for the life of that run — restart the server and you calibrate again.
+ */
+const BOOT_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+app.get('/api/session', (_req, res) => res.json({ bootId: BOOT_ID }));
+
 const tls = FORCE_HTTP ? null : ensureCert();
 const server = tls ? https.createServer(tls, app) : http.createServer(app);
 const scheme = tls ? 'https' : 'http';

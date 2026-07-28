@@ -129,7 +129,7 @@ Judged on fidelity. A 12-point checklist, all of which must be present:
 
 | # | Item | Result |
 |---|---|---|
-| 1 | Health & Safety on boot, dismissed with A | ✅ |
+| 1 | ~~Health & Safety on boot~~ | ❌ **cut** — built, then removed on request. A screen you dismiss every launch is a joke that stops being funny the second time. |
 | 2 | 4×3 grid of rounded channel tiles | ✅ 12 tiles |
 | 3 | Idle wobble | ✅ per-tile phase, out of sync |
 | 4 | Hover highlight | ✅ lifts 0.59 units, scales 1.07× |
@@ -142,7 +142,8 @@ Judged on fidelity. A 12-point checklist, all of which must be present:
 | 11 | Back navigation with its own sound | ✅ |
 | 12 | Page arrows | ✅ present, disabled on a single page |
 
-**13/13** including the select cue. Also met:
+**12/12 of the surviving items** (13/13 as originally built, before the warning
+screen was cut). Also met:
 - **O5 keyboard-free** — A and B on the phone drive boot dismissal, channel
   select, and return-to-menu. Calibration persists to `localStorage`, so
   launching a channel no longer re-runs the hold-still/swing flow; verified by
@@ -157,9 +158,38 @@ function the test drives directly — cadence can't be observed there, behaviour
 can. And an early run reported the music failing; that was a synchronous check
 racing the async `AudioContext.unlock()`, not the music.
 
-The Health & Safety screen and the calibration prompts are DOM rather than
-canvas textures. Both are walls of text where crisp type matters more than
-living in the same renderer, and neither is part of the menu proper.
+The calibration prompts are DOM rather than canvas textures — a wall of text
+where crisp type matters more than living in the same renderer.
+
+### Post-review fixes
+
+Three issues came back from playtesting, and one was a real bug the gates missed.
+
+**The cursor lagged a quarter of the screen behind the hand.** One Euro adapts as
+`cutoff = minCutoff + beta·|speed|`, which makes **beta unit-dependent**. The
+filters were tuned in pixels, where a fast swing produced speeds in the
+thousands. Moving the pointer to normalised 0..1 units during the Phase 0
+extraction shrank speed by the screen width and silently collapsed the adaptive
+term to nothing — leaving a fixed 1.6 Hz low-pass at *every* speed. Measured
+tracking error during a one-per-second sweep: **21% of screen width before,
+3% after.**
+
+O2 never saw this. It measures packet latency, which was a healthy 17.6 ms; the
+250 ms sat downstream in the filter. **Latency to the renderer is not latency to
+the eye** — a gap in the gate, not just in the code. `core.test.mjs` now pins
+tracking error directly. Note that a step-response test would *not* have caught
+it: One Euro initialises to its first sample, so a fresh filter appears to settle
+instantly regardless of its constants.
+
+**Calibration is now scoped to a server run.** The server issues a boot id at
+startup; clients tie their saved calibration to it. Calibrate once when you
+`npm start`, and every channel inherits it. Games no longer contain the flow at
+all — Fruit Ninja starts playing on load, and `R` sends you back to the menu.
+
+**Swing range is capped before it becomes sensitivity.** A player told to make
+"big sweeps" easily produces 120°+, and mapping all of it meant crossing the
+screen took a whole-arm movement. Now clamped to 80° horizontal / 55° vertical
+at 0.75, so pointing stays wrist-scale.
 
 ---
 

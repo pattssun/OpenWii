@@ -34,22 +34,40 @@ import {
  */
 const STORAGE_KEY = 'openwii.calibration.v1';
 
+/**
+ * The server's boot id, fetched once per page. Calibration is scoped to it, so
+ * the flow runs once per `npm start` and every page afterwards inherits it.
+ */
+let bootId = null;
+
+export async function fetchBootId() {
+  if (bootId) return bootId;
+  try {
+    const res = await fetch('/api/session');
+    bootId = (await res.json()).bootId;
+  } catch {
+    bootId = 'unknown';
+  }
+  return bootId;
+}
+
 export function saveCalibration(frame, result) {
   if (!frame) return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ frame, result, at: Date.now() }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ frame, result, bootId, at: Date.now() }));
   } catch { /* private browsing, quota — not fatal */ }
 }
 
-export function loadCalibration({ maxAgeMs = 12 * 60 * 60 * 1000 } = {}) {
+export function loadCalibration() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const saved = JSON.parse(raw);
     if (!saved.frame || !saved.frame.f) return null;
-    // A stale frame is worse than none: the player has almost certainly moved,
-    // and a wrong neutral pose is confusing in a way "please calibrate" is not.
-    if (Date.now() - (saved.at || 0) > maxAgeMs) return null;
+    // Tied to the server run. A calibration from a previous run is stale by
+    // definition — the player has moved, and a wrong neutral pose is more
+    // confusing than being asked to calibrate.
+    if (!bootId || saved.bootId !== bootId) return null;
     return saved;
   } catch {
     return null;
@@ -184,8 +202,12 @@ export class Calibration {
 
   finish() {
     const r = this.range;
-    const spanX = clamp(r.yawMax - r.yawMin, 25, 150);
-    const spanY = clamp(r.pitchMax - r.pitchMin, 14, 110);
+    // Cap how much of the swing maps to the screen. A player told to make "big
+    // sweeps" can easily produce 120°+, and mapping all of it means crossing
+    // the screen takes a whole-arm movement — precise, but exhausting and slow.
+    // Pointing wants wrist-scale motion.
+    const spanX = clamp(r.yawMax - r.yawMin, 25, 80);
+    const spanY = clamp(r.pitchMax - r.pitchMin, 14, 55);
 
     // The middle of their swing is the natural neutral — re-zero there rather
     // than wherever their arm happened to stop.
@@ -195,8 +217,8 @@ export class Calibration {
     this.active = false;
     this.done = true;
     this.step = 'done';
-    // 0.9 leaves a margin so the screen corners stay comfortably reachable.
-    this.result = { degPerScreenX: spanX * 0.9, degPerScreenY: spanY * 0.9, grip: this.frame.axis };
+    // 0.75 leaves margin so the corners stay reachable without stretching.
+    this.result = { degPerScreenX: spanX * 0.75, degPerScreenY: spanY * 0.75, grip: this.frame.axis };
     saveCalibration(this.frame, this.result);
     this.onStep('done');
     this.onDone(this.result);

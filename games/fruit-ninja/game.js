@@ -1,7 +1,7 @@
 import * as THREE from '/vendor/three/three.module.js';
 import { FruitNinja, FIELD_H } from './logic.js';
 import { Pointer } from '../../core/pointer.js';
-import { Calibration, loadCalibration } from '../../core/calibration.js';
+import { Calibration, loadCalibration, fetchBootId } from '../../core/calibration.js';
 import { AudioEngine } from '../../core/audio.js';
 import { GameLink } from '../../core/net.js';
 import { clamp } from '../../core/orientation.js';
@@ -251,27 +251,27 @@ let lastSample = null;
 let lastSampleAt = 0;
 
 const calibration = new Calibration({
-  onStep: (step) => {
-    link.feedback({ type: 'calibration', step, active: calibration.active });
-    renderCalOverlay(step);
-  },
-  onDone: (result) => {
-    pointer.applyCalibration(result);
-    pointer.setFrame(calibration.frame);
-    pointer.recentre();
-    flash(`calibrated · ${result.grip === 'y' ? 'flat grip' : 'upright grip'}`);
-    startGame();
-  },
+  // The flow never runs here; this instance only holds the inherited frame
+  // and services quick re-centres.
 });
 
-// Inherit the menu's calibration. Without this, launching a channel would ask
-// the player to hold still and swing again every single time.
-const savedCalibration = loadCalibration();
-if (savedCalibration) {
-  const result = calibration.restore(savedCalibration);
-  pointer.setFrame(calibration.frame);
-  if (result) pointer.applyCalibration(result);
-}
+/**
+ * Inherit the menu's calibration; never run the flow here.
+ *
+ * Calibration is a once-per-session ritual that belongs to the menu. A channel
+ * that re-runs it makes every launch feel like setup rather than play. If none
+ * is found (someone deep-linked straight to the game), we start anyway with
+ * sensible defaults and let them press B to go back and calibrate properly.
+ */
+fetchBootId().then(() => {
+  const saved = loadCalibration();
+  if (saved) {
+    const result = calibration.restore(saved);
+    pointer.setFrame(calibration.frame);
+    if (result) pointer.applyCalibration(result);
+  }
+  startGame();
+});
 
 function resize() {
   const w = Math.max(1, window.innerWidth);
@@ -308,7 +308,7 @@ const link = new GameLink({
     }
   },
   onCommand: (cmd) => {
-    if (cmd.type === 'calibrate') beginCalibration();
+    if (cmd.type === 'calibrate') goToMenu();
     else if (cmd.type === 'recentre') quickRecentre();
     else if (cmd.type === 'start') beginPlay();
     else if (cmd.type === 'button' && cmd.button === 'A') beginPlay();
@@ -358,19 +358,6 @@ function flash(text) {
 const showOverlay = (html) => { $('panel').innerHTML = html; $('overlay').classList.remove('hide'); };
 const hideOverlay = () => $('overlay').classList.add('hide');
 
-const CAL_COPY = {
-  signal: ['Waiting for the remote', 'Open the controller page and tap Enable motion sensors.'],
-  steady: ['Hold still', 'Grip the phone however feels natural and point it at this screen.'],
-  range: ['Swing it around', 'Big sweeps — left and right, then up and down.'],
-};
-
-function renderCalOverlay(step) {
-  const copy = CAL_COPY[step];
-  if (!copy) { hideOverlay(); return; }
-  showOverlay(`<h1>${copy[0]}</h1><p>${copy[1]}</p>
-    <div class="cta"><strong>Space</strong> to skip · <strong>R</strong> to start over</div>`);
-}
-
 function syncHud() {
   $('score-v').textContent = game.state.score;
   $('best').textContent = `Best ${Math.max(Number(localStorage.getItem('fn.best') || 0), game.state.score)}`;
@@ -380,12 +367,6 @@ function syncHud() {
   const show = game.state.combo > 1;
   combo.classList.toggle('on', show);
   if (show) combo.textContent = `${game.state.combo}× COMBO!`;
-}
-
-function beginCalibration() {
-  audio.unlock();
-  calibration.start(performance.now());
-  game.state.phase = 'idle';
 }
 
 function quickRecentre() {
@@ -406,14 +387,12 @@ function startGame() {
 
 function beginPlay() {
   audio.unlock();
-  if (calibration.active) {
-    calibration.skip(lastSample);
-    if (calibration.frame) pointer.setFrame(calibration.frame);
-    startGame();
-    return;
-  }
-  if (pointer.live && !calibration.done) beginCalibration();
-  else startGame();
+  startGame();
+}
+
+/** Recalibration lives in the menu, so send them there rather than duplicating it. */
+function goToMenu() {
+  window.location.href = '/';
 }
 
 /** Mirror the logic state into the scene graph. Split out so the verification
@@ -482,7 +461,7 @@ window.addEventListener('pointerdown', () => audio.unlock());
 window.addEventListener('keydown', (e) => {
   switch (e.key.toLowerCase()) {
     case ' ': e.preventDefault(); if (game.state.phase !== 'playing') beginPlay(); break;
-    case 'r': beginCalibration(); break;
+    case 'r': goToMenu(); break;
     case 'c': quickRecentre(); break;
     case 'm': {
       const modes = ['hybrid', 'absolute', 'relative', 'gyro'];

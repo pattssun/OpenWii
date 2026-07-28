@@ -14,32 +14,6 @@
   }
   canvas { display: block; position: absolute; inset: 0; width: 100%; height: 100%; }
 
-  /* ── Health & Safety ─────────────────────────────────────────────────── */
-  /* DOM rather than a canvas texture: it's a wall of legal text, and crisp
-     type beats a texture that has to be re-rendered on every resize. */
-  #boot {
-    position: absolute; inset: 0; z-index: 20; background: #fff;
-    display: grid; place-items: center; padding: 6vh 8vw;
-    transition: opacity .55s ease;
-  }
-  #boot.gone { opacity: 0; pointer-events: none; }
-  #boot-inner { max-width: 760px; text-align: center; }
-  #boot h1 {
-    font-size: clamp(20px, 3vw, 34px); margin: 0 0 28px; letter-spacing: -0.01em;
-    display: flex; align-items: center; justify-content: center; gap: 14px;
-  }
-  #boot .tri { color: #d33; font-size: 1.25em; }
-  #boot p { font-size: clamp(13px, 1.3vw, 16px); line-height: 1.8; color: #4b5a6b; margin: 0 0 18px; }
-  #boot .press {
-    margin-top: 42px; font-size: 15px; color: #7a8b9e;
-    animation: blink 1.6s ease-in-out infinite;
-  }
-  #boot .press b {
-    display: inline-grid; place-items: center; width: 30px; height: 30px;
-    border-radius: 50%; background: #2f6fe4; color: #fff; margin: 0 5px;
-    vertical-align: middle; font-size: 15px;
-  }
-  @keyframes blink { 0%, 100% { opacity: 1 } 50% { opacity: .45 } }
 
   /* ── Calibration ─────────────────────────────────────────────────────── */
   #cal {
@@ -102,21 +76,6 @@
 <div id="keys">Point with your phone · <b>A</b> selects · <b>B</b> back · R recalibrate · D debug</div>
 <pre id="debug"></pre>
 
-<div id="boot">
-  <div id="boot-inner">
-    <h1><span class="tri">⚠</span> WARNING — HEALTH AND SAFETY</h1>
-    <p>
-      BEFORE PLAYING, READ YOUR OPERATIONS MANUAL FOR IMPORTANT INFORMATION
-      ABOUT YOUR HEALTH AND SAFETY.
-    </p>
-    <p>
-      Make sure you have enough room to swing freely, and keep a firm grip on
-      your phone. It has no wrist strap, and your television is closer than you
-      think.
-    </p>
-    <div class="press">Press <b>A</b> to continue</div>
-  </div>
-</div>
 
 <script src="/socket.io/socket.io.js"></script>
 <script type="module" src="menu.js"></script>

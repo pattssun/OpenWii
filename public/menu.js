@@ -1,6 +1,6 @@
 import * as THREE from '/vendor/three/three.module.js';
 import { Pointer } from '/core/pointer.js';
-import { Calibration, loadCalibration } from '/core/calibration.js';
+import { Calibration, loadCalibration, fetchBootId } from '/core/calibration.js';
 import { AudioEngine } from '/core/audio.js';
 import { GameLink } from '/core/net.js';
 import { clamp } from '/core/orientation.js';
@@ -382,7 +382,6 @@ let lastSample = null;
 let lastSampleAt = 0;
 let hovered = null;         // tile | arrow | 'wii' | null
 let launching = null;       // { tile, t } during zoom-to-fill
-let booted = false;
 
 const calibration = new Calibration({
   onStep: (step) => {
@@ -406,13 +405,18 @@ const calibration = new Calibration({
   },
 });
 
-// Inherit a calibration from an earlier page if one is still fresh.
-const saved = loadCalibration();
-if (saved) {
-  const result = calibration.restore(saved);
-  pointer.setFrame(calibration.frame);
-  if (result) pointer.applyCalibration(result);
-}
+// Inherit this server run's calibration if one exists. Only the menu ever runs
+// the flow; games inherit it, so calibration happens once per `npm start`.
+let calibrationReady = false;
+fetchBootId().then(() => {
+  const saved = loadCalibration();
+  if (saved) {
+    const result = calibration.restore(saved);
+    pointer.setFrame(calibration.frame);
+    if (result) pointer.applyCalibration(result);
+  }
+  calibrationReady = true;
+});
 
 const link = new GameLink({
   onOrientation: (sample) => {
@@ -423,7 +427,9 @@ const link = new GameLink({
     // Start calibration on the first real sample, not on presence. A phone can
     // sit connected with sensors disabled indefinitely, and gating on presence
     // parks the menu behind a "hold still" prompt that can never be satisfied.
-    if (booted && !calibration.done && !calibration.active) calibration.start(now);
+    // `calibrationReady` waits for the boot-id lookup so we don't kick off a
+    // redundant calibration a beat before discovering a saved one.
+    if (calibrationReady && !calibration.done && !calibration.active) calibration.start(now);
     const frame = calibration.advance(sample, now);
     if (frame && !pointer.frame) pointer.setFrame(frame);
     pointer.update(sample, dt, now);
@@ -444,12 +450,28 @@ const link = new GameLink({
   },
 });
 
+/**
+ * Browsers refuse to start audio without a user gesture, so the music can only
+ * begin on the first interaction. The removed warning screen used to be that
+ * gesture; now any button press or click serves.
+ */
+let audioStarted = false;
+function ensureAudio() {
+  if (audioStarted) return;
+  audioStarted = true;
+  audio.unlock().then((ok) => {
+    if (!ok) { audioStarted = false; return; }
+    audio.startMusic();
+  });
+}
+
 function startCalibration() {
-  audio.unlock();
+  ensureAudio();
   calibration.start(performance.now());
 }
 
 function quickRecentre() {
+  ensureAudio();
   if (lastSample && calibration.recentre(lastSample)) {
     pointer.setFrame(calibration.frame);
     pointer.recentre();
@@ -457,22 +479,9 @@ function quickRecentre() {
   }
 }
 
-// ── Boot: Health & Safety ──────────────────────────────────────────────────
-function dismissBoot() {
-  if (booted) return;
-  booted = true;
-  audio.unlock().then(() => {
-    audio.play('boot');
-    audio.startMusic();
-  });
-  $('boot').classList.add('gone');
-  setTimeout(() => $('boot').remove(), 700);
-}
-
 // ── Interaction ────────────────────────────────────────────────────────────
 function pressA() {
-  audio.unlock();
-  if (!booted) { dismissBoot(); return; }
+  ensureAudio();
   if (calibration.active) return;
   if (launching) return;
 
@@ -482,8 +491,7 @@ function pressA() {
 }
 
 function pressB() {
-  audio.unlock();
-  if (!booted) return;
+  ensureAudio();
   audio.play('back');
 }
 
@@ -592,9 +600,9 @@ function step(now, dt) {
   // enormous on a small window.
   hand.scale.setScalar(L.scale);
   hand.position.set(p.x + 0.3 * L.scale, p.y - 0.44 * L.scale, 3);
-  hand.visible = booted && !launching;
+  hand.visible = !launching;
 
-  if (booted && !calibration.active && !launching) setHover(hitTest(p.x, p.y));
+  if (!calibration.active && !launching) setHover(hitTest(p.x, p.y));
   else if (launching) setHover(null);
 
   // Idle wobble + hover response.
@@ -660,8 +668,9 @@ window.addEventListener('mousemove', (e) => {
   mouse.y = e.clientY / window.innerHeight;
   mouse.active = true;
 });
-window.addEventListener('pointerdown', () => { audio.unlock(); pressA(); });
+window.addEventListener('pointerdown', () => { ensureAudio(); pressA(); });
 window.addEventListener('keydown', (e) => {
+  ensureAudio();
   if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); pressA(); }
   else if (e.key === 'Escape' || e.key.toLowerCase() === 'b') pressB();
   else if (e.key.toLowerCase() === 'r') startCalibration();
@@ -700,6 +709,6 @@ requestAnimationFrame(frame);
 
 window.__openwii = {
   scene, camera, renderer, tiles, arrows, pointer, calibration, audio, link,
-  hitTest, toWorld, pressA, pressB, dismissBoot, step, layout: L,
-  state: () => ({ booted, hovered, launching: !!launching, page, games, fps }),
+  hitTest, toWorld, pressA, pressB, step, layout: L,
+  state: () => ({ hovered, launching: !!launching, page, games, fps }),
 };
