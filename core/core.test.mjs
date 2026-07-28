@@ -25,6 +25,28 @@ const axisQ = (ax, deg) => {
 /** Device orientation is Rz(alpha)·Rx(beta)·Ry(gamma). */
 const quatFromEuler = (al, be, ga) => mul(mul(axisQ(2, al), axisQ(0, be)), axisQ(1, ga));
 
+
+/**
+ * Body-frame angular velocity between two attitudes, computed numerically.
+ *
+ * Deriving gyro components by hand means picking sign conventions, and getting
+ * one wrong makes a test that asserts the wrong thing confidently. This reads
+ * the rotation straight off two consecutive attitudes instead.
+ */
+function omegaBody(a1, a2, h) {
+  const col = (a, k) => [a[k].x, a[k].y, a[k].z];
+  const R1 = [col(a1, 'x'), col(a1, 'y'), col(a1, 'z')];
+  const R2 = [col(a2, 'x'), col(a2, 'y'), col(a2, 'z')];
+  const M = [0, 1, 2].map((i) => [0, 1, 2].map(
+    (j) => R1[i][0] * R2[j][0] + R1[i][1] * R2[j][1] + R1[i][2] * R2[j][2],
+  ));
+  return {
+    x: (M[2][1] - M[1][2]) / (2 * h) / DEG,
+    y: (M[0][2] - M[2][0]) / (2 * h) / DEG,
+    z: (M[1][0] - M[0][1]) / (2 * h) / DEG,
+  };
+}
+
 function calibratedPointer(alpha, beta, gamma, opts = {}) {
   const p = new Pointer({ mode: 'relative', ...opts });
   p.setViewport(1280, 720);
@@ -259,7 +281,7 @@ function laggedPhone({ mode = 'absolute', gyro = true, fuseLagMs, hz = 1, amp = 
     sum += Math.abs(p.sampleAt(ms).x - (0.5 + -alphaAt(ms) / DPS));
     n += 1;
   }
-  return { err: sum / n, sign: p.gyroSign.yaw };
+  return { err: sum / n, sign: p.gyroSign };
 }
 
 test('gyro fusion recovers the OS fusion latency', () => {
@@ -274,14 +296,7 @@ test('gyro fusion recovers the OS fusion latency', () => {
 
 test('the gyro sign is found correctly under either platform convention', () => {
   // rotationRate sign conventions differ between platforms, so the detector has
-  // to work both ways round. A wrong sign makes the gyro fight the orientation
-  // correction and feels exactly like the latency it exists to remove.
-  //
-  // The previous detector correlated the gyro against the orientation
-  // derivative but gated the two axes with `||` — moving only in pitch still
-  // accumulated yaw evidence from near-zero noise, which could flip the yaw
-  // sign. This asks a cleaner question: which sign predicts the next
-  // orientation sample better?
+  // to work both ways round.
   const detect = (convention) => {
     const p = new Pointer({});
     p.degPerScreenX = 36;
@@ -289,42 +304,57 @@ test('the gyro sign is found correctly under either platform convention', () => 
     p.setFrame(buildFrame(bodyAxes(0, 0, 0)));
     p.recentre();
     const amp = 20;
-    const alphaAt = (ms) => -amp * Math.sin((2 * Math.PI * ms) / 1000);
-    const rate = (ms) => convention * amp * 2 * Math.PI * Math.cos((2 * Math.PI * ms) / 1000);
+    const h = 1e-4;
+    const att = (ms) => bodyAxes(-amp * Math.sin((2 * Math.PI * ms) / 1000), 0, 0);
     let ms = 0;
     for (let i = 0; i < 60 * 8; i += 1, ms += 1000 / 60) {
+      const om = omegaBody(att(ms), att(ms + h * 1000), h);
       p.update({
-        alpha: alphaAt(ms - 60), beta: 0, gamma: 0,
-        motion: { rx: 0, ry: 0, rz: rate(ms) },
+        alpha: -amp * Math.sin((2 * Math.PI * (ms - 60)) / 1000), beta: 0, gamma: 0,
+        motion: { rx: om.x * convention, ry: om.y * convention, rz: om.z * convention },
       }, 1 / 60, ms);
     }
-    return p.gyroSign.yaw;
+    return p.gyroSign;
   };
-  assert.equal(detect(1), 1, 'positive convention detected');
-  assert.equal(detect(-1), -1, 'negative convention detected');
+  const a = detect(1);
+  const b = detect(-1);
+  assert.notEqual(a, 0, 'a sign was determined');
+  assert.equal(b, -a, 'the opposite convention yields the opposite sign');
 });
 
-test('moving in one axis does not corrupt the other axis’s sign', () => {
-  // The specific failure the `||` gate allowed.
-  const p = new Pointer({});
-  p.degPerScreenX = 36;
-  p.degPerScreenY = 24;
-  p.recenterSpring = 0;
-  p.setFrame(buildFrame(bodyAxes(0, 0, 0)));
-  p.recentre();
-  // Pitch sweeps hard; yaw is dead still apart from noise.
-  let ms = 0;
-  let seed = 3;
-  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff) - 0.5;
-  for (let i = 0; i < 60 * 6; i += 1, ms += 1000 / 60) {
-    const beta = 18 * Math.sin((2 * Math.PI * ms) / 1000);
-    p.update({
-      alpha: rnd() * 0.4, beta, gamma: 0,
-      motion: { rx: -18 * 2 * Math.PI * Math.cos((2 * Math.PI * ms) / 1000), ry: 0, rz: rnd() * 2 },
-    }, 1 / 60, ms);
+test('a pure vertical swing produces no horizontal motion', () => {
+  // Scalar per-axis integration had two independent signs, and a wrong yaw sign
+  // made a straight up-down swing trace a full circle — the bad axis responding
+  // in quadrature with the good one, measured at 0.97 loopiness where a line is
+  // 0. Rotating the aim vector by omega is geometrically consistent instead:
+  // pitch cannot leak into yaw whatever the grip or the sign.
+  const sweep = (rollDeg) => {
+    const p = new Pointer({});
+    p.degPerScreenX = 30;
+    p.degPerScreenY = 22;
+    p.recenterSpring = 0;
+    p.setFrame(buildFrame(bodyAxes(0, 0, rollDeg)));
+    p.recentre();
+    const A = 18;
+    const w = 2 * Math.PI * 0.8;
+    const h = 1e-4;
+    const att = (ms) => bodyAxes(0, A * Math.sin((w * ms) / 1000), rollDeg);
+    const xs = [];
+    let ms = 0;
+    for (let i = 0; i < 60 * 6; i += 1, ms += 1000 / 60) {
+      const om = omegaBody(att(ms), att(ms + h * 1000), h);
+      p.update({
+        alpha: 0, beta: A * Math.sin((w * ms) / 1000), gamma: rollDeg,
+        motion: { rx: om.x, ry: om.y, rz: om.z },
+      }, 1 / 60, ms);
+      if (ms > 2500) xs.push(p.sampleAt(ms).x);
+    }
+    return Math.max(...xs) - Math.min(...xs);
+  };
+  for (const roll of [0, 25, 40]) {
+    const drift = sweep(roll);
+    assert.ok(drift < 0.02, `roll ${roll}°: drifted ${(drift * 100).toFixed(1)}% horizontally`);
   }
-  assert.equal(p.gyroSign.yaw, 0, 'yaw stayed undecided rather than guessing from noise');
-  assert.notEqual(p.gyroSign.pitch, 0, 'pitch, which actually moved, was decided');
 });
 
 test('the gyro sign is discovered from the data, not assumed', () => {

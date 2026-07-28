@@ -1,6 +1,11 @@
-import { clamp, dot, angleDelta, axesFromSample } from './orientation.js';
+import { clamp, dot, angleDelta, axesFromSample, DEG } from './orientation.js';
 import { OneEuro } from './filter.js';
 import { anglesIn, forwardOf } from './calibration.js';
+
+const norm = (v) => {
+  const L = Math.hypot(v.x, v.y, v.z) || 1;
+  return { x: v.x / L, y: v.y / L, z: v.z / L };
+};
 
 export const MODES = ['absolute', 'hybrid', 'relative', 'gyro'];
 
@@ -151,8 +156,7 @@ export class Pointer {
      * feel, slow path for truth. This is how a Wii Remote feels instant while
      * still knowing where it is pointing.
      */
-    this.fusionTau = options.fusionTau ?? 0.4;   // how fast orientation corrects the gyro
-    this.fused = { yaw: null, pitch: null };
+    this.fusionTau = options.fusionTau ?? 0.8;   // how fast orientation corrects the gyro
 
     /**
      * Which way the gyro points is decided by evidence, not by assumption.
@@ -164,11 +168,10 @@ export class Pointer {
      * derivative and adopt whichever sign the data supports. Until there is
      * enough evidence, fusion stays off and orientation drives alone.
      */
-    this.gyroSign = { yaw: 0, pitch: 0 };
-    this.gyroScore = {
-      yaw: { plus: 0, minus: 0, n: 0 },
-      pitch: { plus: 0, minus: 0, n: 0 },
-    };
+    this.gyroSign = 0;
+    this.gyroScore = { plus: 0, minus: 0, n: 0 };
+    this.fusedFwd = null;
+    this.prevFwd = null;
   }
 
   /**
@@ -225,14 +228,10 @@ export class Pointer {
     this.driftYaw = 0;
     this.driftPitch = 0;
     this.prev = null;
-    this.fused.yaw = null;
-    this.fused.pitch = null;
-    this.prevAngles = null;
-    this.gyroSign = { yaw: 0, pitch: 0 };
-    this.gyroScore = {
-      yaw: { plus: 0, minus: 0, n: 0 },
-      pitch: { plus: 0, minus: 0, n: 0 },
-    };
+    this.gyroSign = 0;
+    this.gyroScore = { plus: 0, minus: 0, n: 0 };
+    this.fusedFwd = null;
+    this.prevFwd = null;
     this.filterX.reset();
     this.filterY.reset();
   }
@@ -260,67 +259,68 @@ export class Pointer {
 
     // ── Gyro fusion ────────────────────────────────────────────────────────
     if (sample.motion && this.mode !== 'gyro') {
+      /**
+       * Rotate the aim vector by the gyro, as a real 3D rotation.
+       *
+       * This used to integrate two independent scalars — one for yaw, one for
+       * pitch — which meant two independent signs to get right. Getting either
+       * wrong is not a subtle degradation: with a wrong yaw sign, swinging
+       * straight up and down traces a full circle on screen, because the bad
+       * axis responds in quadrature with the good one. Measured, that is a
+       * loopiness of 0.97 where a straight line is 0.
+       *
+       * A vector rotated by ω is geometrically consistent by construction: a
+       * pure pitch rotation cannot produce yaw no matter what the grip is, and
+       * there is only ONE sign left to determine rather than two.
+       */
       const { rx = 0, ry = 0, rz = 0 } = sample.motion;
-      const omega = { x: rx, y: ry, z: rz };
-      // Body-frame angular velocity projected onto the calibrated frame's
-      // yaw (up) and pitch (right) axes.
-      const gYaw = dot(omega, {
-        x: dot(axes.x, this.frame.u), y: dot(axes.y, this.frame.u), z: dot(axes.z, this.frame.u),
-      });
-      const gPitch = dot(omega, {
-        x: dot(axes.x, this.frame.r), y: dot(axes.y, this.frame.r), z: dot(axes.z, this.frame.r),
+      // Body-frame rates → world-frame angular velocity, in rad/s.
+      const w = {
+        x: (axes.x.x * rx + axes.y.x * ry + axes.z.x * rz) * DEG,
+        y: (axes.x.y * rx + axes.y.y * ry + axes.z.y * rz) * DEG,
+        z: (axes.x.z * rx + axes.y.z * ry + axes.z.z * rz) * DEG,
+      };
+
+      const step = (v, sign) => norm({
+        x: v.x + sign * (w.y * v.z - w.z * v.y) * dt,
+        y: v.y + sign * (w.z * v.x - w.x * v.z) * dt,
+        z: v.z + sign * (w.x * v.y - w.y * v.x) * dt,
       });
 
-      /**
-       * Decide the gyro's sign by asking which hypothesis predicts better.
-       *
-       * For each axis, integrate one step forward under both signs and compare
-       * against the orientation actually observed. Whichever predicts it more
-       * closely is the correct sign. Both hypotheses face the same orientation
-       * lag, so the lag cancels and cannot bias the answer.
-       *
-       * This replaces a correlation test that was gated with `||` across the
-       * two axes: moving only in pitch still accumulated yaw evidence out of
-       * near-zero noise, and enough of that could flip the yaw sign. A wrong
-       * sign makes the gyro fight the orientation correction, which feels
-       * exactly like the latency it is supposed to remove.
-       *
-       * The scores decay, so a wrong call is not permanent.
-       */
-      if (this.prevAngles) {
-        const decay = Math.exp(-dt / 3);
-        for (const [axis, observed, rate, prev] of [
-          ['yaw', yaw, gYaw, this.prevAngles.yaw],
-          ['pitch', pitch, gPitch, this.prevAngles.pitch],
-        ]) {
-          const moved = Math.abs(angleDelta(observed, prev)) / dt;
-          if (moved < 12) continue;              // per-axis: only real motion counts
-          const ePlus = Math.abs(angleDelta(observed, prev + rate * dt));
-          const eMinus = Math.abs(angleDelta(observed, prev - rate * dt));
-          this.gyroScore[axis].plus = this.gyroScore[axis].plus * decay + ePlus;
-          this.gyroScore[axis].minus = this.gyroScore[axis].minus * decay + eMinus;
-          this.gyroScore[axis].n = this.gyroScore[axis].n * decay + 1;
-          if (this.gyroScore[axis].n > 6) {
-            const { plus, minus } = this.gyroScore[axis];
-            // Require a clear winner; a near-tie means we don't know yet.
+      // One sign, decided by which rotation better predicts the orientation we
+      // actually observed. Both hypotheses face the same orientation lag, so
+      // the lag cancels out and cannot bias the answer. Scores decay, so a
+      // wrong call corrects itself.
+      if (this.prevFwd) {
+        const moved = Math.acos(clamp(dot(this.prevFwd, fwd), -1, 1)) / DEG / dt;
+        if (moved > 12) {
+          const decay = Math.exp(-dt / 3);
+          const ePlus = 1 - dot(step(this.prevFwd, 1), fwd);
+          const eMinus = 1 - dot(step(this.prevFwd, -1), fwd);
+          this.gyroScore.plus = this.gyroScore.plus * decay + ePlus;
+          this.gyroScore.minus = this.gyroScore.minus * decay + eMinus;
+          this.gyroScore.n = this.gyroScore.n * decay + 1;
+          if (this.gyroScore.n > 6) {
+            const { plus, minus } = this.gyroScore;
             if (Math.abs(plus - minus) > 0.15 * Math.max(plus, minus)) {
-              this.gyroSign[axis] = plus < minus ? 1 : -1;
+              this.gyroSign = plus < minus ? 1 : -1;
             }
           }
         }
       }
-      this.prevAngles = { yaw, pitch };
+      this.prevFwd = fwd;
 
-      if (this.gyroSign.yaw !== 0) {
-        if (this.fused.yaw === null) { this.fused.yaw = yaw; this.fused.pitch = pitch; }
-        // Fast: integrate the gyro. Slow: bleed toward the fused orientation.
-        this.fused.yaw += this.gyroSign.yaw * gYaw * dt;
-        this.fused.pitch += this.gyroSign.pitch * gPitch * dt;
+      if (this.gyroSign !== 0) {
+        if (!this.fusedFwd) this.fusedFwd = fwd;
+        // Fast: rotate by the gyro. Slow: bleed toward the observed attitude.
+        const rotated = step(this.fusedFwd, this.gyroSign);
         const k = clamp(dt / this.fusionTau, 0, 1);
-        this.fused.yaw += angleDelta(yaw, this.fused.yaw) * k;
-        this.fused.pitch += (pitch - this.fused.pitch) * k;
-        yaw = this.fused.yaw;
-        pitch = this.fused.pitch;
+        this.fusedFwd = norm({
+          x: rotated.x + (fwd.x - rotated.x) * k,
+          y: rotated.y + (fwd.y - rotated.y) * k,
+          z: rotated.z + (fwd.z - rotated.z) * k,
+        });
+        ({ yaw, pitch } = anglesIn(this.frame, this.fusedFwd));
       }
     }
 
