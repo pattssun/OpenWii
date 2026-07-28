@@ -13,8 +13,18 @@
 
 const EXTENSIONS = ['mp3', 'wav', 'ogg'];
 
+/**
+ * Global mute, currently ON.
+ *
+ * Turned off during development because a background tab kept playing the menu
+ * loop. Flip this single flag to bring the whole sound design back — every cue
+ * and the music route through it, so nothing needs re-wiring.
+ */
+export const AUDIO_MUTED = true;
+
 export class AudioEngine {
-  constructor({ basePath = '/audio', volume = 0.7 } = {}) {
+  constructor({ basePath = '/audio', volume = 0.7, muted = AUDIO_MUTED } = {}) {
+    this.muted = muted;
     this.basePath = basePath;
     this.ctx = null;
     this.master = null;
@@ -32,6 +42,9 @@ export class AudioEngine {
    * safe to call repeatedly.
    */
   async unlock() {
+    // Muted: never even create an AudioContext, so a backgrounded tab has
+    // nothing to keep alive.
+    if (this.muted) return false;
     if (!this.ctx) {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (!Ctx) return false;
@@ -68,7 +81,7 @@ export class AudioEngine {
   }
 
   play(name, opts = {}) {
-    if (!this.enabled || !this.ctx) return;
+    if (this.muted || !this.enabled || !this.ctx) return;
     const override = this.overrides.get(name);
     if (override) return this.playBuffer(override, opts);
     // Kick off the probe for next time; use the synth right now so the first
@@ -142,7 +155,7 @@ export class AudioEngine {
    * buffer, so it loops seamlessly and can be stopped mid-phrase.
    */
   startMusic() {
-    if (!this.ctx || this.music) return;
+    if (this.muted || !this.ctx || this.music) return;
     const beat = 0.5;
     // Lazy ii–V–I-ish wander in C, sevenths throughout for the soft major mood.
     const chords = [

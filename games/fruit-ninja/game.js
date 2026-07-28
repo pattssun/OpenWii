@@ -302,10 +302,7 @@ const link = new GameLink({
     if (frame && !pointer.frame) pointer.setFrame(frame);
     pointer.update(sample, dt, now);
 
-    if (!calibration.active && pointer.frame) {
-      const p = toWorld(pointer.position.x, pointer.position.y);
-      game.setCursor(p.x, p.y, now);
-    }
+
   },
   onCommand: (cmd) => {
     if (cmd.type === 'calibrate') goToMenu();
@@ -434,12 +431,17 @@ function frame(now) {
     fpsMark = now;
   }
 
-  if (!pointer.live && mouse.active) {
-    pointer.setFromMouse(mouse.x, mouse.y);
-    const p = toWorld(mouse.x, mouse.y);
+  if (!pointer.live && mouse.active) pointer.setFromMouse(mouse.x, mouse.y);
+  if (pointer.live && now - pointer.lastSeen > 500) pointer.live = false;
+
+  // Drive the blade every frame, not every packet. The trail is sampled here
+  // too, so its speed window sees display-rate motion rather than packet-rate
+  // steps — which is what the slice threshold is tuned against.
+  if (pointer.frame || mouse.active) {
+    const aim = pointer.sampleAt(now);
+    const p = toWorld(aim.x, aim.y);
     game.setCursor(p.x, p.y, now);
   }
-  if (pointer.live && now - pointer.lastSeen > 500) pointer.live = false;
 
   game.update(now, dt);
   syncScene();
@@ -495,7 +497,7 @@ setInterval(() => {
     `grip        ${pointer.frame ? (pointer.frame.axis === 'y' ? 'flat (top edge)' : 'upright (back)') : '—'}`,
     `yaw/pitch   ${pointer.angles.yaw.toFixed(1)}° / ${pointer.angles.pitch.toFixed(1)}°`,
     `drift       ${pointer.driftYaw.toFixed(2)}° / ${pointer.driftPitch.toFixed(2)}°`,
-    `pointer     ${pointer.position.x.toFixed(3)}, ${pointer.position.y.toFixed(3)}`,
+    `pointer     ${pointer.display.x.toFixed(3)}, ${pointer.display.y.toFixed(3)}`,
     `gesture     ${game.trail.speed().toFixed(2)} u/s`,
     `sensor rate ${link.rate.toFixed(0)} Hz`,
     `source      ${pointer.source}`,

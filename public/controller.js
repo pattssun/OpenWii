@@ -126,6 +126,28 @@ function onOrientation(e) {
     // iOS exposes a true-north heading; useful as a drift-free yaw source.
     heading: typeof e.webkitCompassHeading === 'number' ? e.webkitCompassHeading : null,
   };
+  flush();
+}
+
+/**
+ * Send the moment the sensor speaks.
+ *
+ * This used to latch the newest sample and flush it on the phone's own
+ * requestAnimationFrame, to cap the wire rate. But rAF is tied to the phone's
+ * display refresh, so it added up to a full frame of pure delay before the
+ * packet even left the device — and the rate cap below does the same job
+ * without costing anything.
+ */
+const MIN_EMIT_MS = 6;    // ~166Hz ceiling; real sensors run well under this
+let lastEmit = 0;
+
+function flush() {
+  if (!streaming || !latest) return;
+  const now = performance.now();
+  if (now - lastEmit < MIN_EMIT_MS) return;
+  lastEmit = now;
+  socket.emit('orientation', { ...latest, motion, t: now });
+  sent += 1;
 }
 
 function onMotion(e) {
@@ -376,13 +398,9 @@ function transportName() {
 function tick(now) {
   requestAnimationFrame(tick);
 
+  // Sending happens in flush(), on the sensor event. This loop is only for the
+  // on-screen readouts, which have no reason to be on the latency path.
   if (streaming && latest) {
-    // Deliberately not volatile — see the note in server.js. Volatile packets
-    // are dropped whenever the transport isn't writable, which silently kills
-    // the whole stream on long-polling connections.
-    socket.emit('orientation', { ...latest, motion, t: now });
-    sent += 1;
-
     const a = displayAngles(latest);
     els.yaw.textContent = Math.round(a.yaw);
     els.pitch.textContent = Math.round(a.pitch);

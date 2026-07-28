@@ -147,6 +147,80 @@ test('the cursor keeps up with a moving hand', () => {
   assert.ok(worst < 0.08, `worst tracking error ${(worst * 100).toFixed(1)}% of screen`);
 });
 
+/**
+ * Full pipeline: a 60Hz sensor, a 20ms delivery delay, and a 60Hz display.
+ * Error is measured between the pixel drawn *this frame* and where the hand
+ * actually is at that instant — which is what a player perceives, and what the
+ * O2 packet-latency gate cannot see.
+ */
+function trackingError({ predict = true, hz = 1, amp = 25, delayMs = 20, secs = 3 } = {}) {
+  const FRAME_MS = 1000 / 60;
+  const SENSOR_MS = 1000 / 60;
+  const DPS = 60;
+  const p = calibratedPointer(0, 0, 0, { mode: 'absolute' });
+  p.mode = 'absolute';
+  p.degPerScreenX = DPS;
+  if (!predict) { p.lead = 0; p.maxAhead = 0; p.maxLeap = 0; }
+  p.recentre();
+
+  const truth = (ms) => -amp * Math.sin((2 * Math.PI * hz * ms) / 1000);
+  let nextSensor = 0;
+  let lastSend = 0;
+  let sum = 0;
+  let n = 0;
+  for (let ms = 0; ms <= secs * 1000; ms += FRAME_MS) {
+    while (nextSensor + delayMs <= ms) {
+      const dt = lastSend ? (nextSensor - lastSend) / 1000 : 1 / 60;
+      lastSend = nextSensor;
+      p.update({ alpha: truth(nextSensor), beta: 0, gamma: 0 }, dt, ms);
+      nextSensor += SENSOR_MS;
+    }
+    if (ms < 400) continue;                       // let it settle
+    sum += Math.abs(p.sampleAt(ms).x - (0.5 + -truth(ms) / DPS));
+    n += 1;
+  }
+  return sum / n;
+}
+
+test('the drawn cursor stays close to where the hand actually is', () => {
+  const err = trackingError({ hz: 1 });
+  assert.ok(err < 0.04, `mean tracking error ${(err * 100).toFixed(1)}% of screen`);
+});
+
+test('per-frame prediction beats drawing the last packet', () => {
+  const withPrediction = trackingError({ predict: true });
+  const without = trackingError({ predict: false });
+  assert.ok(withPrediction < without * 0.7,
+    `${(without * 100).toFixed(1)}% → ${(withPrediction * 100).toFixed(1)}%`);
+});
+
+test('prediction does not fling the cursor when the hand stops', () => {
+  // Overshoot at a hard stop is the failure mode of extrapolation, and it
+  // reads as imprecision. Cap it.
+  const FRAME_MS = 1000 / 60;
+  const DPS = 60;
+  const amp = 25;
+  const p = calibratedPointer(0, 0, 0, { mode: 'absolute' });
+  p.mode = 'absolute';
+  p.degPerScreenX = DPS;
+  p.recentre();
+  const truth = (ms) => (ms < 250 ? -amp * (ms / 250) : -amp);
+  const target = 0.5 + amp / DPS;
+  let s = 0;
+  let last = 0;
+  let peak = 0;
+  for (let ms = 0; ms <= 1500; ms += FRAME_MS) {
+    while (s + 20 <= ms) {
+      const dt = last ? (s - last) / 1000 : 1 / 60;
+      last = s;
+      p.update({ alpha: truth(s), beta: 0, gamma: 0 }, dt, ms);
+      s += 1000 / 60;
+    }
+    if (ms > 250) peak = Math.max(peak, p.sampleAt(ms).x - target);
+  }
+  assert.ok(peak < 0.06, `overshoot ${(peak * 100).toFixed(1)}% of screen`);
+});
+
 test('the smoothing filter actually opens up with speed', () => {
   // `cutoff = minCutoff + beta*|speed|` makes beta unit-dependent. When the
   // pointer moved from pixels to normalised units, beta kept its pixel-era

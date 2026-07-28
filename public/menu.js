@@ -594,7 +594,9 @@ function step(now, dt) {
   if (!pointer.live && mouse.active) pointer.setFromMouse(mouse.x, mouse.y);
   if (pointer.live && now - pointer.lastSeen > 500) pointer.live = false;
 
-  const p = toWorld(pointer.position.x, pointer.position.y);
+  // Per-frame prediction, not the last packet — see Pointer.sampleAt.
+  const aim = pointer.sampleAt(now);
+  const p = toWorld(aim.x, aim.y);
   // The hotspot is the fingertip, so the sprite hangs down-right of the aim
   // point. Both sprite and offset scale with the layout, or the cursor looks
   // enormous on a small window.
@@ -694,7 +696,8 @@ setInterval(() => {
   if (!$('debug').classList.contains('on')) return;
   $('debug').textContent = [
     `fps         ${fps.toFixed(0)}`,
-    `pointer     ${pointer.position.x.toFixed(3)}, ${pointer.position.y.toFixed(3)}`,
+    `pointer     ${pointer.display.x.toFixed(3)}, ${pointer.display.y.toFixed(3)}`,
+    `lead        ${(pointer.lead*1000).toFixed(0)}ms  vel ${pointer.vel.x.toFixed(2)}/s`,
     `mode        ${pointer.mode}`,
     `grip        ${pointer.frame ? (pointer.frame.axis === 'y' ? 'flat' : 'upright') : '—'}`,
     `hover       ${hovered === 'wii' ? 'Wii button' : hovered && hovered.dir !== undefined ? 'arrow' : hovered && hovered.game ? hovered.game.title : '—'}`,
