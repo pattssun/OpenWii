@@ -78,12 +78,32 @@ export function clearCalibration() {
   try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
 }
 
-export const STEADY_MS = 700;
+// Long enough to be a real measurement of the hand's tremor plus the sensor's
+// own noise, not just a couple of samples that happened to agree.
+export const STEADY_MS = 1200;
 const STEADY_KEEP_MS = STEADY_MS * 1.6;
 const STEADY_GIVE_UP_MS = 6000;
 const COS_STEADY = Math.cos(5 * DEG);
 
 export const CAL_STEPS = ['signal', 'steady', 'range', 'done'];
+
+/**
+ * Peak angular deviation, in degrees, across a window of "held still" samples.
+ *
+ * This is the hand's tremor plus the sensor's noise — the floor below which no
+ * movement can be trusted as intent. Everything downstream that has to
+ * distinguish "the player moved" from "the player is human" is scaled off it.
+ */
+export function measureNoise(buf, current) {
+  let worst = 0;
+  for (const s of buf) {
+    // The two axes bound the phone's attitude; the larger deviation wins.
+    const a = Math.acos(clamp(dot(s.y, current.y), -1, 1));
+    const b = Math.acos(clamp(dot(s.z, current.z), -1, 1));
+    worst = Math.max(worst, a, b);
+  }
+  return worst / DEG;
+}
 
 /** Build a frame around whichever axis the player is pointing with. */
 export function buildFrame(axes) {
@@ -127,6 +147,7 @@ export class Calibration {
     this.steadyBuf = [];
     this.frame = null;
     this.range = { yawMin: 0, yawMax: 0, pitchMin: 0, pitchMax: 0 };
+    this.noiseDeg = 0;
     this.result = null;
   }
 
@@ -174,6 +195,9 @@ export class Calibration {
         const built = buildFrame(axes);
         if (built) {
           this.frame = built;
+          // The hold is also a measurement: how much does this hand, holding
+          // this phone, wobble when it is trying not to?
+          this.noiseDeg = measureNoise(this.steadyBuf, axes);
           this.range = { yawMin: 0, yawMax: 0, pitchMin: 0, pitchMax: 0 };
           this.setStep('range', now);
         } else if (givenUp) {
@@ -206,8 +230,14 @@ export class Calibration {
     // sweeps" can easily produce 120°+, and mapping all of it means crossing
     // the screen takes a whole-arm movement — precise, but exhausting and slow.
     // Pointing wants wrist-scale motion.
-    const spanX = clamp(r.yawMax - r.yawMin, 25, 80);
-    const spanY = clamp(r.pitchMax - r.pitchMin, 14, 55);
+    //
+    // The lower bound is where jitter lives: on-screen wobble is noise divided
+    // by degrees-per-screen, so a tight mapping magnifies a shaky hand. Hold
+    // the floor far enough above the measured noise that tremor stays under
+    // roughly 1% of screen width.
+    const noiseFloor = clamp(this.noiseDeg * 90, 25, 60);
+    const spanX = clamp(r.yawMax - r.yawMin, noiseFloor, 80);
+    const spanY = clamp(r.pitchMax - r.pitchMin, noiseFloor * 0.62, 55);
 
     // The middle of their swing is the natural neutral — re-zero there rather
     // than wherever their arm happened to stop.
@@ -218,7 +248,12 @@ export class Calibration {
     this.done = true;
     this.step = 'done';
     // 0.75 leaves margin so the corners stay reachable without stretching.
-    this.result = { degPerScreenX: spanX * 0.75, degPerScreenY: spanY * 0.75, grip: this.frame.axis };
+    this.result = {
+      degPerScreenX: spanX * 0.75,
+      degPerScreenY: spanY * 0.75,
+      grip: this.frame.axis,
+      noiseDeg: this.noiseDeg,
+    };
     saveCalibration(this.frame, this.result);
     this.onStep('done');
     this.onDone(this.result);

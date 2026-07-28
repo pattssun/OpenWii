@@ -390,7 +390,7 @@ const calibration = new Calibration({
     if (calibration.active) {
       const copy = {
         signal: ['Waiting for the remote', 'Open the controller page on your phone and tap Enable motion sensors.'],
-        steady: ['Hold still', 'Grip the phone however feels natural and point it at this screen.'],
+        steady: ['Hold still', 'Grip the phone however feels natural, point it at this screen, and keep it as steady as you can — this is measuring how much your hand shakes.'],
         range: ['Swing it around', 'Big sweeps — left and right, then up and down.'],
       }[step];
       if (copy) { $('cal-title').textContent = copy[0]; $('cal-body').textContent = copy[1]; }
@@ -697,7 +697,9 @@ setInterval(() => {
   $('debug').textContent = [
     `fps         ${fps.toFixed(0)}`,
     `pointer     ${pointer.display.x.toFixed(3)}, ${pointer.display.y.toFixed(3)}`,
-    `lead        ${(pointer.lead*1000).toFixed(0)}ms  vel ${pointer.vel.x.toFixed(2)}/s`,
+    `lead        ${(pointer.lead*1000).toFixed(0)}ms  vel ${Math.hypot(pointer.vel.x, pointer.vel.y).toFixed(2)}/s`,
+    `hand noise  ${pointer.noiseDeg.toFixed(2)}deg  gate ${pointer.gateLo.toFixed(2)}`,
+    `deg/screen  ${pointer.degPerScreenX.toFixed(0)} x ${pointer.degPerScreenY.toFixed(0)}  cutoff ${pointer.filterX.minCutoff.toFixed(1)}Hz`,
     `mode        ${pointer.mode}`,
     `grip        ${pointer.frame ? (pointer.frame.axis === 'y' ? 'flat' : 'upright') : '—'}`,
     `hover       ${hovered === 'wii' ? 'Wii button' : hovered && hovered.dir !== undefined ? 'arrow' : hovered && hovered.game ? hovered.game.title : '—'}`,

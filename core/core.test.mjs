@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { bodyAxes, bodyAxesFromQuat, DEG } from './orientation.js';
-import { buildFrame } from './calibration.js';
+import { buildFrame, measureNoise } from './calibration.js';
 import { Pointer } from './pointer.js';
 
 /**
@@ -220,6 +220,65 @@ test('prediction does not fling the cursor when the hand stops', () => {
   }
   assert.ok(peak < 0.06, `overshoot ${(peak * 100).toFixed(1)}% of screen`);
 });
+
+/** Cursor travel while the hand is still and only the sensor is noisy. */
+function restingWobble({ noiseDeg, dps, gated = true }) {
+  const p = calibratedPointer(0, 0, 0, { mode: 'absolute' });
+  p.mode = 'absolute';
+  p.degPerScreenX = dps;
+  if (gated) p.setNoiseFloor(noiseDeg);
+  else { p.gateLo = 0; p.gateHi = 1e-6; }
+  p.recentre();
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff) - 0.5;
+  let min = 1;
+  let max = 0;
+  let s = 0;
+  for (let ms = 0; ms <= 3000; ms += 1000 / 60) {
+    while (s + 20 <= ms) {
+      p.update({ alpha: rnd() * noiseDeg, beta: 0, gamma: 0 }, 1 / 60, ms);
+      s += 1000 / 60;
+    }
+    if (ms < 500) continue;
+    const x = p.sampleAt(ms).x;
+    min = Math.min(min, x);
+    max = Math.max(max, x);
+  }
+  return max - min;
+}
+
+test('prediction does not amplify jitter while the hand is still', () => {
+  // Extrapolating a velocity that is pure sensor noise moves the cursor for no
+  // reason. Measured, this made resting jitter ~1.5x worse than not predicting
+  // at all — so prediction fades in only above the measured noise floor.
+  const gated = restingWobble({ noiseDeg: 1.0, dps: 45, gated: true });
+  const ungated = restingWobble({ noiseDeg: 1.0, dps: 45, gated: false });
+  assert.ok(gated < ungated * 0.75, `${(ungated * 100).toFixed(2)}% → ${(gated * 100).toFixed(2)}%`);
+});
+
+test('a shaky hand still gets a steady cursor', () => {
+  const w = restingWobble({ noiseDeg: 1.5, dps: 45 });
+  assert.ok(w < 0.03, `resting wobble ${(w * 100).toFixed(2)}% of screen`);
+});
+
+test('calibration measures the hand’s noise floor', () => {
+  const still = [];
+  const shaky = [];
+  for (let i = 0; i < 40; i += 1) {
+    still.push({ t: i * 20, ...pick(bodyAxes(0.05 * ((i % 3) - 1), 0, 0)) });
+    shaky.push({ t: i * 20, ...pick(bodyAxes(1.2 * ((i % 3) - 1), 0, 0)) });
+  }
+  const current = bodyAxes(0, 0, 0);
+  const a = measureNoise(still, current);
+  const b = measureNoise(shaky, current);
+  assert.ok(a < 0.2, `steady hand reads ${a.toFixed(2)}°`);
+  assert.ok(b > 0.8, `shaky hand reads ${b.toFixed(2)}°`);
+  assert.ok(b > a * 4, 'the two are clearly distinguished');
+});
+
+function pick(axes) {
+  return { y: axes.y, z: axes.z };
+}
 
 test('the smoothing filter actually opens up with speed', () => {
   // `cutoff = minCutoff + beta*|speed|` makes beta unit-dependent. When the

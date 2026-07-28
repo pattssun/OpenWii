@@ -111,6 +111,46 @@ export class Pointer {
     this.velTau = options.velTau ?? 0.045;       // velocity smoothing
     this.vel = { x: 0, y: 0 };                   // screen fractions per second
     this.display = { x: 0.5, y: 0.5 };           // what the renderer should draw
+
+    /**
+     * Motion gate.
+     *
+     * At rest the velocity estimate is pure sensor noise, and extrapolating
+     * noise is worse than not extrapolating at all — measured, prediction
+     * amplified resting jitter by about 1.5x. So prediction fades in only once
+     * the pointer is moving faster than the hand's own noise floor. Below
+     * `gateLo` the drawn position is exactly the filtered position.
+     *
+     * Thresholds are set from the noise measured during calibration; these are
+     * fallbacks for an uncalibrated pointer.
+     */
+    this.gateLo = options.gateLo ?? 0.12;        // screen fractions/sec
+    this.gateHi = options.gateHi ?? 0.45;
+    this.noiseDeg = 0;
+  }
+
+  /**
+   * Adapt to the phone's measured resting jitter.
+   *
+   * Two levers, and the useful one is not the obvious one. Smoothing barely
+   * helps — dropping the cutoff from 10Hz to 2.5Hz only cut wobble by a third
+   * while costing real responsiveness. Gating prediction and widening the
+   * angular mapping do far more, because jitter on screen is noise divided by
+   * degrees-per-screen.
+   */
+  setNoiseFloor(noiseDeg) {
+    this.noiseDeg = noiseDeg || 0;
+    if (!this.noiseDeg) return;
+    // Noise expressed as a fraction of the screen, then as the speed at which
+    // that much travel would look like real motion rather than tremor.
+    const noiseScreen = this.noiseDeg / this.degPerScreenX;
+    this.gateLo = clamp(noiseScreen / 0.16, 0.08, 1.2);
+    this.gateHi = this.gateLo * 3;
+    // A noisier sensor gets gentler smoothing-per-speed, but only modestly:
+    // this lever is weak and over-using it just adds lag.
+    const cut = clamp(11 - noiseScreen * 90, 4, 12);
+    this.filterX.minCutoff = cut;
+    this.filterY.minCutoff = cut;
   }
 
   setViewport(w, h) {
@@ -123,11 +163,12 @@ export class Pointer {
     this.prev = null;
   }
 
-  /** Apply calibration output (screen span per axis). */
+  /** Apply calibration output (screen span per axis, plus the noise floor). */
   applyCalibration(result) {
     if (!result) return;
     this.degPerScreenX = result.degPerScreenX;
     this.degPerScreenY = result.degPerScreenY;
+    this.setNoiseFloor(result.noiseDeg);
   }
 
   recentre() {
@@ -246,8 +287,18 @@ export class Pointer {
       this.display.y = this.position.y;
       return this.display;
     }
+    // Fade prediction in with real motion. Below the noise floor there is
+    // nothing to predict, so the drawn position is the filtered one exactly.
+    const speed = Math.hypot(this.vel.x, this.vel.y);
+    const gate = clamp((speed - this.gateLo) / Math.max(1e-6, this.gateHi - this.gateLo), 0, 1);
+    if (gate <= 0) {
+      this.display.x = this.position.x;
+      this.display.y = this.position.y;
+      return this.display;
+    }
+
     const since = Math.max(0, (now - this.lastSeen) / 1000);
-    const ahead = Math.min(since + this.lead, this.maxAhead);
+    const ahead = Math.min((since + this.lead) * gate, this.maxAhead);
     const dx = clamp(this.vel.x * ahead, -this.maxLeap, this.maxLeap);
     const dy = clamp(this.vel.y * ahead, -this.maxLeap, this.maxLeap);
     this.display.x = clamp(this.position.x + dx, 0, 1);

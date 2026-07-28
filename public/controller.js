@@ -65,7 +65,7 @@ socket.on('slot-denied', ({ max }) => {
 // looking at the monitor, so the instructions have to be here too.
 const CAL_COPY = {
   signal: ['📡 Connecting', 'Waiting for sensor data…'],
-  steady: ['🧍 Hold still', 'Grip it how you like, point it at the screen.'],
+  steady: ['🧍 Hold still', 'Point it at the screen and keep it steady — measuring your hand.'],
   range: ['🌀 Swing it around', 'Big sweeps — side to side, then up and down.'],
   done: ['🎮 Ready', 'Point and swing.'],
 };
