@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { bodyAxes, bodyAxesFromQuat, DEG } from './orientation.js';
-import { buildFrame, measureNoise } from './calibration.js';
+import { buildFrame, measureNoise, Calibration } from './calibration.js';
 import { Pointer } from './pointer.js';
 
 /**
@@ -272,6 +272,61 @@ test('gyro fusion recovers the OS fusion latency', () => {
     `${(orientationOnly.err * 100).toFixed(1)}% → ${(fused.err * 100).toFixed(1)}%`);
 });
 
+test('the gyro sign is found correctly under either platform convention', () => {
+  // rotationRate sign conventions differ between platforms, so the detector has
+  // to work both ways round. A wrong sign makes the gyro fight the orientation
+  // correction and feels exactly like the latency it exists to remove.
+  //
+  // The previous detector correlated the gyro against the orientation
+  // derivative but gated the two axes with `||` — moving only in pitch still
+  // accumulated yaw evidence from near-zero noise, which could flip the yaw
+  // sign. This asks a cleaner question: which sign predicts the next
+  // orientation sample better?
+  const detect = (convention) => {
+    const p = new Pointer({});
+    p.degPerScreenX = 36;
+    p.recenterSpring = 0;
+    p.setFrame(buildFrame(bodyAxes(0, 0, 0)));
+    p.recentre();
+    const amp = 20;
+    const alphaAt = (ms) => -amp * Math.sin((2 * Math.PI * ms) / 1000);
+    const rate = (ms) => convention * amp * 2 * Math.PI * Math.cos((2 * Math.PI * ms) / 1000);
+    let ms = 0;
+    for (let i = 0; i < 60 * 8; i += 1, ms += 1000 / 60) {
+      p.update({
+        alpha: alphaAt(ms - 60), beta: 0, gamma: 0,
+        motion: { rx: 0, ry: 0, rz: rate(ms) },
+      }, 1 / 60, ms);
+    }
+    return p.gyroSign.yaw;
+  };
+  assert.equal(detect(1), 1, 'positive convention detected');
+  assert.equal(detect(-1), -1, 'negative convention detected');
+});
+
+test('moving in one axis does not corrupt the other axis’s sign', () => {
+  // The specific failure the `||` gate allowed.
+  const p = new Pointer({});
+  p.degPerScreenX = 36;
+  p.degPerScreenY = 24;
+  p.recenterSpring = 0;
+  p.setFrame(buildFrame(bodyAxes(0, 0, 0)));
+  p.recentre();
+  // Pitch sweeps hard; yaw is dead still apart from noise.
+  let ms = 0;
+  let seed = 3;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff) - 0.5;
+  for (let i = 0; i < 60 * 6; i += 1, ms += 1000 / 60) {
+    const beta = 18 * Math.sin((2 * Math.PI * ms) / 1000);
+    p.update({
+      alpha: rnd() * 0.4, beta, gamma: 0,
+      motion: { rx: -18 * 2 * Math.PI * Math.cos((2 * Math.PI * ms) / 1000), ry: 0, rz: rnd() * 2 },
+    }, 1 / 60, ms);
+  }
+  assert.equal(p.gyroSign.yaw, 0, 'yaw stayed undecided rather than guessing from noise');
+  assert.notEqual(p.gyroSign.pitch, 0, 'pitch, which actually moved, was decided');
+});
+
 test('the gyro sign is discovered from the data, not assumed', () => {
   // rotationRate sign conventions differ between platforms. Getting it wrong
   // makes the fast and slow paths fight, which is worse than no fusion at all.
@@ -319,6 +374,31 @@ test('prediction does not amplify jitter while the hand is still', () => {
 test('a shaky hand still gets a steady cursor', () => {
   const w = restingWobble({ noiseDeg: 1.5, dps: 45 });
   assert.ok(w < 0.03, `resting wobble ${(w * 100).toFixed(2)}% of screen`);
+});
+
+test('the swing step waits for both directions on both axes', () => {
+  // It used to end on total span, so sweeping left-right and then merely
+  // *upward* satisfied it — calibration closed before you could come back down
+  // and the downward half of your range was never measured.
+  const cal = new Calibration();
+  let ms = 0;
+  cal.start(ms);
+  const feed = (alpha, beta) => { ms += 16; cal.advance({ alpha, beta, gamma: 0 }, ms); };
+
+  for (let i = 0; i < 120; i += 1) feed(0, 0);            // hold still
+  assert.equal(cal.step, 'range', 'reached the swing step');
+
+  // Full horizontal sweep, then upward only — and pause there.
+  for (let i = 0; i < 90; i += 1) feed(-25 * Math.sin(i / 14), 0);
+  for (let i = 0; i < 60; i += 1) feed(0, 18 * (i / 60));
+  for (let i = 0; i < 90; i += 1) feed(0, 18);            // held at the top
+  assert.equal(cal.done, false, 'still waiting for the downward half');
+
+  // Now come back down through neutral.
+  for (let i = 0; i < 60; i += 1) feed(0, 18 - 36 * (i / 60));
+  for (let i = 0; i < 90; i += 1) feed(0, -18);
+  assert.equal(cal.done, true, 'completes once both directions are seen');
+  assert.ok(cal.range.pitchMin < -7 && cal.range.pitchMax > 7, 'measured both ways');
 });
 
 test('calibration measures the hand’s noise floor', () => {

@@ -66,7 +66,7 @@ socket.on('slot-denied', ({ max }) => {
 const CAL_COPY = {
   signal: ['📡 Connecting', 'Waiting for sensor data…'],
   steady: ['🧍 Hold still', 'Point it at the screen and keep it steady — measuring your hand.'],
-  range: ['🌀 Swing it around', 'Big sweeps — side to side, then up and down.'],
+  range: ['🌀 Swing it around', 'Left and right, then up AND down. It ends when you stop.'],
   done: ['🎮 Ready', 'Point and swing.'],
 };
 

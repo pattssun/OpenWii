@@ -165,8 +165,10 @@ export class Pointer {
      * enough evidence, fusion stays off and orientation drives alone.
      */
     this.gyroSign = { yaw: 0, pitch: 0 };
-    this.gyroCorr = { yaw: 0, pitch: 0 };
-    this.gyroSeen = 0;
+    this.gyroScore = {
+      yaw: { plus: 0, minus: 0, n: 0 },
+      pitch: { plus: 0, minus: 0, n: 0 },
+    };
   }
 
   /**
@@ -226,6 +228,11 @@ export class Pointer {
     this.fused.yaw = null;
     this.fused.pitch = null;
     this.prevAngles = null;
+    this.gyroSign = { yaw: 0, pitch: 0 };
+    this.gyroScore = {
+      yaw: { plus: 0, minus: 0, n: 0 },
+      pitch: { plus: 0, minus: 0, n: 0 },
+    };
     this.filterX.reset();
     this.filterY.reset();
   }
@@ -264,18 +271,41 @@ export class Pointer {
         x: dot(axes.x, this.frame.r), y: dot(axes.y, this.frame.r), z: dot(axes.z, this.frame.r),
       });
 
-      // Learn the sign by correlating against the orientation's own derivative.
+      /**
+       * Decide the gyro's sign by asking which hypothesis predicts better.
+       *
+       * For each axis, integrate one step forward under both signs and compare
+       * against the orientation actually observed. Whichever predicts it more
+       * closely is the correct sign. Both hypotheses face the same orientation
+       * lag, so the lag cancels and cannot bias the answer.
+       *
+       * This replaces a correlation test that was gated with `||` across the
+       * two axes: moving only in pitch still accumulated yaw evidence out of
+       * near-zero noise, and enough of that could flip the yaw sign. A wrong
+       * sign makes the gyro fight the orientation correction, which feels
+       * exactly like the latency it is supposed to remove.
+       *
+       * The scores decay, so a wrong call is not permanent.
+       */
       if (this.prevAngles) {
-        const oYaw = angleDelta(yaw, this.prevAngles.yaw) / dt;
-        const oPitch = (pitch - this.prevAngles.pitch) / dt;
-        // Only learn from real motion; noise correlates with nothing.
-        if (Math.abs(oYaw) > 8 || Math.abs(oPitch) > 8) {
-          this.gyroCorr.yaw += oYaw * gYaw;
-          this.gyroCorr.pitch += oPitch * gPitch;
-          this.gyroSeen += 1;
-          if (this.gyroSeen > 8) {
-            if (this.gyroCorr.yaw !== 0) this.gyroSign.yaw = Math.sign(this.gyroCorr.yaw);
-            if (this.gyroCorr.pitch !== 0) this.gyroSign.pitch = Math.sign(this.gyroCorr.pitch);
+        const decay = Math.exp(-dt / 3);
+        for (const [axis, observed, rate, prev] of [
+          ['yaw', yaw, gYaw, this.prevAngles.yaw],
+          ['pitch', pitch, gPitch, this.prevAngles.pitch],
+        ]) {
+          const moved = Math.abs(angleDelta(observed, prev)) / dt;
+          if (moved < 12) continue;              // per-axis: only real motion counts
+          const ePlus = Math.abs(angleDelta(observed, prev + rate * dt));
+          const eMinus = Math.abs(angleDelta(observed, prev - rate * dt));
+          this.gyroScore[axis].plus = this.gyroScore[axis].plus * decay + ePlus;
+          this.gyroScore[axis].minus = this.gyroScore[axis].minus * decay + eMinus;
+          this.gyroScore[axis].n = this.gyroScore[axis].n * decay + 1;
+          if (this.gyroScore[axis].n > 6) {
+            const { plus, minus } = this.gyroScore[axis];
+            // Require a clear winner; a near-tie means we don't know yet.
+            if (Math.abs(plus - minus) > 0.15 * Math.max(plus, minus)) {
+              this.gyroSign[axis] = plus < minus ? 1 : -1;
+            }
           }
         }
       }

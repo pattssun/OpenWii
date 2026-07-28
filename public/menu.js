@@ -393,7 +393,7 @@ const calibration = new Calibration({
       const copy = {
         signal: ['Waiting for the remote', 'Open the controller page on your phone and tap Enable motion sensors.'],
         steady: ['Hold still', 'Grip the phone however feels natural, point it at this screen, and keep it as steady as you can — this is measuring how much your hand shakes.'],
-        range: ['Swing it around', 'Big sweeps — left and right, then up and down.'],
+        range: ['Swing it around', 'Sweep fully left and right, then all the way up and down. Take your time — it ends when you stop.'],
       }[step];
       if (copy) { $('cal-title').textContent = copy[0]; $('cal-body').textContent = copy[1]; }
     }

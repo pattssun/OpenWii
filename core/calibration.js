@@ -171,6 +171,8 @@ export class Calibration {
     this.frame = null;
     this.range = { yawMin: 0, yawMax: 0, pitchMin: 0, pitchMax: 0 };
     this.noiseDeg = 0;
+    this.lastSpan = 0;
+    this.spanStillSince = 0;
     this.result = null;
   }
 
@@ -222,6 +224,8 @@ export class Calibration {
           // this phone, wobble when it is trying not to?
           this.noiseDeg = measureNoise(this.steadyBuf, axes);
           this.range = { yawMin: 0, yawMax: 0, pitchMin: 0, pitchMax: 0 };
+          this.lastSpan = 0;
+          this.spanStillSince = now;
           this.setStep('range', now);
         } else if (givenUp) {
           this.stepSince = now;          // dead vertical: no usable frame
@@ -238,10 +242,26 @@ export class Calibration {
       r.pitchMin = Math.min(r.pitchMin, pitch);
       r.pitchMax = Math.max(r.pitchMax, pitch);
 
-      const spanX = r.yawMax - r.yawMin;
-      const spanY = r.pitchMax - r.pitchMin;
+      /**
+       * End when the player has finished, not the instant a threshold is met.
+       *
+       * The old rule tested total span, so sweeping left-right and then merely
+       * *upward* satisfied it — calibration closed before you could come back
+       * down, and the whole downward half of your range went unmeasured. Now
+       * each direction has to be seen on its own, and the swept range has to
+       * have stopped growing for a moment, so it ends when you stop rather than
+       * mid-swing.
+       */
+      const bothYaw = r.yawMin < -12 && r.yawMax > 12;
+      const bothPitch = r.pitchMin < -7 && r.pitchMax > 7;
+      const span = (r.yawMax - r.yawMin) + (r.pitchMax - r.pitchMin);
+      if (span > this.lastSpan + 0.5) {
+        this.lastSpan = span;
+        this.spanStillSince = now;             // still exploring
+      }
+      const settled = now - (this.spanStillSince || now) > 900;
       const elapsed = now - this.stepSince;
-      if ((spanX > 30 && spanY > 14 && elapsed > 2600) || elapsed > 10000) this.finish();
+      if ((bothYaw && bothPitch && settled && elapsed > 3000) || elapsed > 14000) this.finish();
     }
 
     return this.frame;
