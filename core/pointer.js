@@ -2,26 +2,32 @@ import { clamp, dot, angleDelta, axesFromSample } from './orientation.js';
 import { OneEuro } from './filter.js';
 import { anglesIn, forwardOf } from './calibration.js';
 
-export const MODES = ['fusion', 'hybrid', 'absolute', 'relative', 'gyro'];
+export const MODES = ['absolute', 'hybrid', 'relative', 'gyro'];
 
 /**
  * Screen pointer driven by phone attitude.
  *
- *   fusion   — DEFAULT. Gyro integrated for immediate response, corrected
- *              slowly toward the fused orientation so it never drifts, then
- *              the same long-horizon drift correction as hybrid. The closest
- *              a phone gets to the Wii Remote's IR pointing.
- *   hybrid   — absolute aiming with slow drift correction, plus fusion when
- *              rotationRate is available.
- *   absolute — raw angle off neutral. No drift correction, so magnetometer
- *              wander accumulates.
+ *   absolute — DEFAULT. Cursor position IS the angle off your calibrated
+ *              neutral: point at the corner and the cursor is at the corner.
+ *              This is what the Wii Remote does, and nothing else feels like
+ *              it. Every mode below trades that directness for something, and
+ *              the trade is never worth it for pointing.
+ *
+ *              Gyro fusion still applies — that is about latency, not drift,
+ *              and it is what makes the directness feel instant rather than
+ *              merely correct. The cost of pure absolute is that yaw wander
+ *              is never corrected, so re-centring (C, or the phone's button)
+ *              is the remedy. The Wii doesn't need one because IR is a genuine
+ *              external reference; a phone has no sensor bar to look at.
+ *   hybrid   — absolute plus slow drift correction. Cancels wander at the cost
+ *              of the cursor quietly disagreeing with where you are pointing.
  *   relative — integrates the *change* in angle, like a mouse. Never gets lost;
  *              never feels like pointing at the screen.
  *   gyro     — integrates rotationRate directly. Ignores the magnetometer.
  */
 export class Pointer {
   constructor(options = {}) {
-    this.mode = options.mode || 'fusion';
+    this.mode = options.mode || 'absolute';
     this.sensitivity = options.sensitivity ?? 1;
     this.degPerScreenX = options.degPerScreenX ?? 55;
     this.degPerScreenY = options.degPerScreenY ?? 38;
@@ -246,7 +252,7 @@ export class Pointer {
     let { yaw, pitch } = anglesIn(this.frame, fwd);
 
     // ── Gyro fusion ────────────────────────────────────────────────────────
-    if (sample.motion && (this.mode === 'fusion' || this.mode === 'hybrid')) {
+    if (sample.motion && this.mode !== 'gyro') {
       const { rx = 0, ry = 0, rz = 0 } = sample.motion;
       const omega = { x: rx, y: ry, z: rz };
       // Body-frame angular velocity projected onto the calibrated frame's
@@ -297,19 +303,18 @@ export class Pointer {
     let tx;
     let ty;
 
-    if (this.mode === 'hybrid' || this.mode === 'fusion') {
+    if (this.mode === 'hybrid') {
       /**
-       * Only learn drift while the player is actually moving.
+       * Drift correction — no longer the default, and worth understanding why.
        *
-       * The estimator assumes a persistent non-zero mean is sensor drift. That
-       * holds while someone is using the pointer, and is badly wrong when they
+       * The estimator treats a persistent non-zero mean as sensor drift. That
+       * holds while someone is using the pointer and is badly wrong while they
        * are holding an aim: it reads the deliberate offset as drift and
-       * subtracts it, so the cursor slides steadily toward the centre of the
-       * screen. Measured, a perfectly steady aim migrated 28% of screen width
-       * in a minute — the cursor visibly refusing to stay where you point it.
-       *
-       * Freezing the estimate while still costs nothing: a stationary sensor
-       * isn't accumulating error worth correcting.
+       * subtracts it, so the cursor slides toward the centre of the screen.
+       * Gating it on movement fixed the worst of that, but any correction at
+       * all means the cursor and the phone disagree about where you're
+       * pointing — and disagreeing with the player is exactly what breaks the
+       * illusion of a laser pointer.
        */
       const moving = Math.hypot(this.vel.x, this.vel.y) > this.gateLo;
       const a = moving ? 1 - Math.exp(-dt / this.driftTau) : 0;

@@ -246,7 +246,7 @@ function drawTrail() {
 const audio = new AudioEngine();
 
 // ── Pointer + calibration ──────────────────────────────────────────────────
-const pointer = new Pointer({ mode: 'fusion' });
+const pointer = new Pointer({ mode: 'absolute' });
 pointer.sensitivity = loadSensitivity() ?? 1;
 let lastSample = null;
 let lastSampleAt = 0;
@@ -467,7 +467,7 @@ window.addEventListener('keydown', (e) => {
     case 'r': goToMenu(); break;
     case 'c': quickRecentre(); break;
     case 'm': {
-      const modes = ['hybrid', 'absolute', 'relative', 'gyro'];
+      const modes = ['absolute', 'hybrid', 'relative', 'gyro'];
       pointer.mode = modes[(modes.indexOf(pointer.mode) + 1) % modes.length];
       pointer.recentre();
       flash(`mapping: ${pointer.mode}`);

@@ -377,7 +377,7 @@ scene.add(hand);
 
 // ── State ──────────────────────────────────────────────────────────────────
 const audio = new AudioEngine();
-const pointer = new Pointer({ mode: 'fusion' });
+const pointer = new Pointer({ mode: 'absolute' });
 // Pointer speed is a remembered preference, not something calibration derives.
 pointer.sensitivity = loadSensitivity() ?? 1;
 let lastSample = null;
@@ -716,6 +716,7 @@ setInterval(() => {
     `lead        ${(pointer.lead*1000).toFixed(0)}ms  vel ${Math.hypot(pointer.vel.x, pointer.vel.y).toFixed(2)}/s`,
     `hand noise  ${pointer.noiseDeg.toFixed(2)}deg  gate ${pointer.gateLo.toFixed(2)}`,
     `gyro fusion ${pointer.gyroSign.yaw ? 'on (sign ' + pointer.gyroSign.yaw + ')' : 'learning…'}`,
+    `drift corr  ${pointer.mode === 'hybrid' ? pointer.driftYaw.toFixed(2) + 'deg' : 'off (absolute)'}`,
     `deg/screen  ${pointer.degPerScreenX.toFixed(0)} x ${pointer.degPerScreenY.toFixed(0)}  cutoff ${pointer.filterX.minCutoff.toFixed(1)}Hz`,
     `mode        ${pointer.mode}`,
     `grip        ${pointer.frame ? (pointer.frame.axis === 'y' ? 'flat' : 'upright') : '—'}`,

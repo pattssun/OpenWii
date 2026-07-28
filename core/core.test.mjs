@@ -227,7 +227,7 @@ test('prediction does not fling the cursor when the hand stops', () => {
  * not. Every earlier simulation here fed the pointer a perfect orientation
  * signal, which hid the single largest source of felt latency.
  */
-function laggedPhone({ mode, fuseLagMs, hz = 1, amp = 20, secs = 6 }) {
+function laggedPhone({ mode = 'absolute', gyro = true, fuseLagMs, hz = 1, amp = 20, secs = 6 }) {
   const DPS = 45;
   const FRAME = 1000 / 60;
   const WIRE = 15;
@@ -251,7 +251,7 @@ function laggedPhone({ mode, fuseLagMs, hz = 1, amp = 20, secs = 6 }) {
       const dt = last ? (s - last) / 1000 : 1 / 60;
       last = s;
       const sample = { alpha: alphaAt(s - fuseLagMs), beta: 0, gamma: 0 };
-      if (mode !== 'absolute') sample.motion = { rx: 0, ry: 0, rz: rzAt(s) };
+      if (gyro) sample.motion = { rx: 0, ry: 0, rz: rzAt(s) };
       p.update(sample, dt, ms);
       s += 1000 / 60;
     }
@@ -266,8 +266,8 @@ test('gyro fusion recovers the OS fusion latency', () => {
   // deviceorientation lag is inherent to the platform and cannot be filtered
   // away downstream. Integrating the raw gyro and correcting slowly toward
   // orientation is the only way to get it back.
-  const fused = laggedPhone({ mode: 'fusion', fuseLagMs: 60 });
-  const orientationOnly = laggedPhone({ mode: 'absolute', fuseLagMs: 60 });
+  const fused = laggedPhone({ gyro: true, fuseLagMs: 60 });
+  const orientationOnly = laggedPhone({ gyro: false, fuseLagMs: 60 });
   assert.ok(fused.err < orientationOnly.err * 0.5,
     `${(orientationOnly.err * 100).toFixed(1)}% → ${(fused.err * 100).toFixed(1)}%`);
 });
@@ -275,9 +275,9 @@ test('gyro fusion recovers the OS fusion latency', () => {
 test('the gyro sign is discovered from the data, not assumed', () => {
   // rotationRate sign conventions differ between platforms. Getting it wrong
   // makes the fast and slow paths fight, which is worse than no fusion at all.
-  const { sign } = laggedPhone({ mode: 'fusion', fuseLagMs: 30 });
+  const { sign } = laggedPhone({ fuseLagMs: 30 });
   assert.notEqual(sign, 0, 'a sign was determined');
-  const err = laggedPhone({ mode: 'fusion', fuseLagMs: 30 }).err;
+  const err = laggedPhone({ fuseLagMs: 30 }).err;
   assert.ok(err < 0.04, `and it is the right one — error ${(err * 100).toFixed(1)}%`);
 });
 
@@ -358,8 +358,8 @@ test('a held aim stays exactly where it is pointed', () => {
   // deliberate offset as drift and dragged the cursor toward centre — measured
   // at 28% of screen width over a minute, which is the cursor visibly refusing
   // to stay put. It now only learns while the pointer is moving.
-  const p = calibratedPointer(0, 0, 0, { mode: 'fusion' });
-  p.mode = 'fusion';
+  const p = calibratedPointer(0, 0, 0, { mode: 'absolute' });
+  p.mode = 'absolute';
   p.recentre();
   let first = null;
   for (let i = 0, ms = 0; i <= 60 * 60; i += 1, ms += 1000 / 60) {

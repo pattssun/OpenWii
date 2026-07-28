@@ -40,7 +40,7 @@ reference for the games.
 | Art | Low-poly originals built procedurally in code. No binary model assets. |
 | Audio | Synthesized sound-alikes via Web Audio. Every cue overridable by dropping a file, so real audio can be swapped in later without code changes. |
 | Players | Single player. Room/slot protocol designed for multi from the start so adding phones later is not a rewrite. |
-| Pointer | Hybrid — absolute aiming off the calibrated neutral, with slow drift correction. |
+| Pointer | **Absolute** — cursor position is the angle off the calibrated neutral. Point at the corner, the cursor is at the corner. *(Revised 2026-07-28: the interview chose hybrid; playtesting showed the drift correction was the thing making the cursor feel imprecise, so we moved to the option originally recommended. See below.)* |
 | Sequencing | Depth-first. Foundation, then the menu, then Swordplay as the reference game. |
 
 ### Channel lineup
@@ -188,8 +188,37 @@ all — Fruit Ninja starts playing on load, and `R` sends you back to the menu.
 
 **Swing range is capped before it becomes sensitivity.** A player told to make
 "big sweeps" easily produces 120°+, and mapping all of it meant crossing the
-screen took a whole-arm movement. Now clamped to 80° horizontal / 55° vertical
-at 0.75, so pointing stays wrist-scale.
+screen took a whole-arm movement. Now clamped so pointing stays wrist-scale, and
+speed is adjustable live with ←/→ and remembered across restarts — it is a
+preference, not something calibration can derive.
+
+### The pointer mode, revisited
+
+The interview offered absolute, relative, and hybrid. Absolute was recommended —
+"what the Wii actually does and the iconic feel" — and hybrid was chosen. Four
+rounds of playtest feedback later, hybrid's drift correction turned out to be
+the thing making the cursor feel imprecise, so we moved to absolute.
+
+The mechanism: drift correction treats a persistent non-zero mean as sensor
+error. That is true while someone is *using* the pointer and false while they
+are *holding* an aim, where it reads the deliberate offset as drift and
+subtracts it. Measured, a steady aim slid 28% of screen width in a minute.
+Gating it on movement fixed the worst case, but any correction at all means the
+cursor quietly disagrees with the phone about where you are pointing — which is
+precisely the illusion a laser pointer depends on.
+
+Absolute now measures **0.0% error**: point at a spot, the cursor is on it, and
+it is still on it thirty seconds later.
+
+Gyro fusion is orthogonal and still applies. Fusion is about *latency*; drift
+correction is about *reference*. Keeping the first and dropping the second gives
+directness and immediacy together — at 60ms of OS fusion lag, 4.0% error with
+the gyro versus 13.0% without.
+
+The cost, stated plainly: nothing corrects yaw wander any more, so the cursor
+can slowly lose its zero. The remedy is re-centring (`C`, or the phone's
+button). The Wii doesn't need one because IR gives it a genuine external
+reference; a phone has no sensor bar to look at.
 
 ---
 
