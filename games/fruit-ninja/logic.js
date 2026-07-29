@@ -46,9 +46,9 @@ export class FruitNinja {
 
     this.state = {
       phase: 'idle',        // idle | playing | over
-      score: 0,
-      lives: 3,
-      combo: 0,
+      score: 0,              // combined total across every player, for the HUD/back-compat
+      lives: 3,               // one shared pool: everyone's on the same board
+      combo: 0,               // mirrors whichever player most recently scored
       comboUntil: 0,
       nextSpawn: 0,
       startedAt: 0,
@@ -57,20 +57,51 @@ export class FruitNinja {
     this.fruits = [];
     this.halves = [];
     this.particles = [];
-    this.trail = new Trail({ lifetimeMs: 140, minStep: 0.004, speedWindowMs: 55 });
-    this.cursor = { x: 0, y: 0, active: false };
+    // One board, sliced by up to MAX_PLAYERS blades — one per connected phone
+    // (the server tags every packet with a `slot`; see server.js). Each slot
+    // gets its own trail, so simultaneous swings never contaminate each
+    // other's speed/segment history. Entries are created lazily by
+    // `setCursor` and persist for the session (a reconnect keeps its slot's
+    // running score), so this Map is never cleared, only reset in `start`.
+    this.players = new Map();
   }
 
   setAspect(aspect) {
     this.w = this.h * aspect;
   }
 
-  /** Pointer position in world units. */
-  setCursor(x, y, now) {
-    this.cursor.x = x;
-    this.cursor.y = y;
-    this.cursor.active = true;
-    this.trail.push(x, y, now);
+  /** Lazily create a player's per-slot state: trail, cursor, score, combo. */
+  getPlayer(slot) {
+    let p = this.players.get(slot);
+    if (!p) {
+      p = {
+        slot,
+        trail: new Trail({ lifetimeMs: 140, minStep: 0.004, speedWindowMs: 55 }),
+        cursor: { x: 0, y: 0, active: false },
+        score: 0,
+        combo: 0,
+        comboUntil: 0,
+        lastActiveAt: -Infinity,
+      };
+      this.players.set(slot, p);
+    }
+    return p;
+  }
+
+  // Back-compat accessors for the common single-player case (tests, and any
+  // renderer code that hasn't been made slot-aware) — slot 0's trail/cursor.
+  get trail() { return this.getPlayer(0).trail; }
+  get cursor() { return this.getPlayer(0).cursor; }
+
+  /** A phone's blade position in world units. `slot` defaults to the lone
+   *  single-player controller. */
+  setCursor(x, y, now, slot = 0) {
+    const p = this.getPlayer(slot);
+    p.cursor.x = x;
+    p.cursor.y = y;
+    p.cursor.active = true;
+    p.lastActiveAt = now;
+    p.trail.push(x, y, now);
   }
 
   start(now) {
@@ -81,7 +112,15 @@ export class FruitNinja {
     this.fruits.length = 0;
     this.halves.length = 0;
     this.particles.length = 0;
-    this.trail.clear();
+    // Fresh round for every player who's ever connected — scores and combos
+    // reset, but the slot (and its blade colour) is kept, so nobody has to
+    // reconnect between rounds.
+    for (const p of this.players.values()) {
+      p.score = 0;
+      p.combo = 0;
+      p.comboUntil = 0;
+      p.trail.clear();
+    }
     this.onEvent({ type: 'start' });
   }
 
@@ -173,8 +212,22 @@ export class FruitNinja {
       this.state.nextSpawn = now + this.spawnInterval(now);
     }
 
-    const canCut = this.trail.speed() > MIN_SLICE_SPEED && this.trail.segments.length > 0;
     const floor = -this.h / 2 - 1.2;
+
+    // Only blades that are actually moving (and recently — see lastActiveAt
+    // below) can cut. Computed once per frame, same as the old single-blade
+    // version, just fanned out across however many phones are connected.
+    const activeBlades = [];
+    for (const p of this.players.values()) {
+      // A staleness cutoff on top of the speed gate: without it, a player who
+      // disconnects (or whose game.js stops calling setCursor) mid-swing
+      // leaves their last real segment frozen in place forever — trail.speed()
+      // keeps reporting that final swing's speed because nothing ages it
+      // without a fresh push(). A "ghost blade" that never goes cold would
+      // keep slicing anything that happens to drift across its last position.
+      if (now - p.lastActiveAt > 200) continue;
+      if (p.trail.speed() > MIN_SLICE_SPEED && p.trail.segments.length > 0) activeBlades.push(p);
+    }
 
     for (let i = this.fruits.length - 1; i >= 0; i -= 1) {
       const f = this.fruits[i];
@@ -183,38 +236,52 @@ export class FruitNinja {
       f.y += f.vy * dt;
       f.rot += f.spin * dt;
 
-      if (canCut) {
-        let cut = false;
-        for (const s of this.trail.segments) {
+      let cutBy = null;
+      let cutSeg = null;
+      for (const p of activeBlades) {
+        for (const s of p.trail.segments) {
           if (segmentDistance(f.x, f.y, s.x1, s.y1, s.x2, s.y2) > f.r) continue;
-          cut = true;
-          this.fruits.splice(i, 1);
-          if (f.bomb) {
-            this.explode(f);
-            if (this.infiniteLives) {
-              // Practice: the blast costs points, not the run.
-              this.state.score = Math.max(0, this.state.score - BOMB_PENALTY);
-              this.state.combo = 0;
-              this.onEvent({ type: 'bomb', fatal: false, x: f.x, y: f.y });
-            } else {
-              this.onEvent({ type: 'bomb', fatal: true, x: f.x, y: f.y });
-              this.end(now);
-            }
-          } else {
-            this.slice(f, Math.atan2(s.y2 - s.y1, s.x2 - s.x1), now);
-            this.state.combo = now < this.state.comboUntil ? this.state.combo + 1 : 1;
-            this.state.comboUntil = now + 260;
-            const critical = this.rng() < CRITICAL_CHANCE;
-            const gained = 1 + (this.state.combo > 1 ? this.state.combo : 0) + (critical ? 10 : 0);
-            this.state.score += gained;
-            this.onEvent({
-              type: 'slice', combo: this.state.combo, gained, critical,
-              x: f.x, y: f.y, kind: f.kind, r: f.r,
-            });
-          }
+          cutBy = p;
+          cutSeg = s;
           break;
         }
-        if (cut) continue;
+        if (cutBy) break;
+      }
+
+      if (cutBy) {
+        this.fruits.splice(i, 1);
+        if (f.bomb) {
+          this.explode(f);
+          if (this.infiniteLives) {
+            // Practice: the blast costs points, not the run.
+            this.state.score = Math.max(0, this.state.score - BOMB_PENALTY);
+            cutBy.score = Math.max(0, cutBy.score - BOMB_PENALTY);
+            cutBy.combo = 0;
+            this.state.combo = 0;
+            this.onEvent({ type: 'bomb', fatal: false, x: f.x, y: f.y, slot: cutBy.slot });
+          } else {
+            this.onEvent({ type: 'bomb', fatal: true, x: f.x, y: f.y, slot: cutBy.slot });
+            this.end(now);
+          }
+        } else {
+          this.slice(f, Math.atan2(cutSeg.y2 - cutSeg.y1, cutSeg.x2 - cutSeg.x1), now);
+          cutBy.combo = now < cutBy.comboUntil ? cutBy.combo + 1 : 1;
+          cutBy.comboUntil = now + 260;
+          // Mirrored onto shared state for back-compat (single-player reads
+          // state.combo directly) and so the HUD's combo banner always shows
+          // whoever most recently extended a streak.
+          this.state.combo = cutBy.combo;
+          this.state.comboUntil = cutBy.comboUntil;
+          const critical = this.rng() < CRITICAL_CHANCE;
+          const gained = 1 + (cutBy.combo > 1 ? cutBy.combo : 0) + (critical ? 10 : 0);
+          cutBy.score += gained;
+          this.state.score += gained;
+          this.onEvent({
+            type: 'slice', combo: cutBy.combo, gained, critical,
+            x: f.x, y: f.y, kind: f.kind, r: f.r, slot: cutBy.slot, playerScore: cutBy.score,
+          });
+        }
+        continue;
       }
 
       if (f.y + f.r < floor) {
@@ -227,6 +294,9 @@ export class FruitNinja {
       }
     }
 
+    for (const p of this.players.values()) {
+      if (p.combo > 1 && now >= p.comboUntil) p.combo = 0;
+    }
     if (this.state.combo > 1 && now >= this.state.comboUntil) this.state.combo = 0;
   }
 

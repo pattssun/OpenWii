@@ -656,12 +656,14 @@ function stepSplats(now) {
   }
 }
 
-// ── Blade trail ────────────────────────────────────────────────────────────
+// ── Blade trails, one per player ────────────────────────────────────────────
 /**
  * A tapered ribbon rather than a line: the blade arc is the signature visual,
  * and THREE.Line is locked to 1px on every platform regardless of linewidth.
- * Two passes — a wide soft glow under a bright white core — for the original's
- * silver swoosh.
+ * Two passes — a wide soft glow under a bright core — for the original's
+ * silver swoosh. Every connected phone gets its own pair, tinted so it's
+ * obvious whose blade is whose; slot 0 keeps the exact white-on-blue look
+ * solo play has always had.
  */
 const RIBBON_MAX = 48;
 
@@ -693,25 +695,43 @@ function makeRibbon({ width, colour, opacity, blending }) {
   return mesh;
 }
 
-const ribbons = [
-  makeRibbon({ width: 0.5, colour: 0xbfd9ff, opacity: 0.35, blending: THREE.AdditiveBlending }),
-  makeRibbon({ width: 0.16, colour: 0xffffff, opacity: 0.95, blending: THREE.NormalBlending }),
+// Fixed palette by slot — 4 phones max (see server.js's MAX_PLAYERS).
+const PLAYER_TINTS = [
+  { glow: 0xbfd9ff, core: 0xffffff },   // slot 0 — the original white/blue blade
+  { glow: 0xffb3c0, core: 0xff5f6d },   // slot 1 — red
+  { glow: 0xc8f5b0, core: 0x7ed957 },   // slot 2 — green
+  { glow: 0xffe9b0, core: 0xffd166 },   // slot 3 — gold
 ];
+const tintFor = (slot) => PLAYER_TINTS[slot % PLAYER_TINTS.length];
 
-const tip = new THREE.Mesh(
-  new THREE.SphereGeometry(0.11, 12, 10),
-  new THREE.MeshBasicMaterial({ color: 0xffffff }),
-);
-scene.add(tip);
-const tipGlow = new THREE.PointLight(0xdfeaff, 5, 6);
-scene.add(tipGlow);
+const visuals = new Map();   // slot → { ribbons: [glow, core], tip, tipGlow }
+function visualFor(slot) {
+  let v = visuals.get(slot);
+  if (v) return v;
+  const tint = tintFor(slot);
+  const ribbons = [
+    makeRibbon({ width: 0.5, colour: tint.glow, opacity: 0.35, blending: THREE.AdditiveBlending }),
+    makeRibbon({ width: 0.16, colour: tint.core, opacity: 0.95, blending: THREE.NormalBlending }),
+  ];
+  const tip = new THREE.Mesh(
+    new THREE.SphereGeometry(0.11, 12, 10),
+    new THREE.MeshBasicMaterial({ color: tint.core }),
+  );
+  scene.add(tip);
+  const tipGlow = new THREE.PointLight(tint.glow, 5, 6);
+  scene.add(tipGlow);
+  v = { ribbons, tip, tipGlow };
+  visuals.set(slot, v);
+  return v;
+}
+visualFor(0);   // eager — solo play's blade exists at the same instant it always has
 
-function drawTrail() {
-  const pts = game.trail.points;
+function drawOneTrail(player, v) {
+  const pts = player.trail.points;
   const n = Math.min(pts.length, RIBBON_MAX);
   const start = pts.length - n;
 
-  for (const ribbon of ribbons) {
+  for (const ribbon of v.ribbons) {
     const pos = ribbon.geometry.attributes.position.array;
     const col = ribbon.geometry.attributes.color.array;
     const { width, colour } = ribbon.userData;
@@ -734,9 +754,9 @@ function drawTrail() {
       pos[o + 3] = p.x + ty * hw; pos[o + 4] = p.y - tx * hw; pos[o + 5] = 0.4;
 
       const c = i * 8;
-      for (const v of [0, 4]) {
-        col[c + v] = colour.r; col[c + v + 1] = colour.g; col[c + v + 2] = colour.b;
-        col[c + v + 3] = taper * taper;
+      for (const off of [0, 4]) {
+        col[c + off] = colour.r; col[c + off + 1] = colour.g; col[c + off + 2] = colour.b;
+        col[c + off + 3] = taper * taper;
       }
     }
 
@@ -746,10 +766,14 @@ function drawTrail() {
     ribbon.visible = n > 1;
   }
 
-  tip.position.set(game.cursor.x, game.cursor.y, 0.4);
-  tipGlow.position.copy(tip.position);
-  tip.visible = game.cursor.active;
-  tipGlow.visible = game.cursor.active;
+  v.tip.position.set(player.cursor.x, player.cursor.y, 0.4);
+  v.tipGlow.position.copy(v.tip.position);
+  v.tip.visible = player.cursor.active;
+  v.tipGlow.visible = player.cursor.active;
+}
+
+function drawTrail() {
+  for (const [slot, player] of game.players) drawOneTrail(player, visualFor(slot));
 }
 
 // ── Audio ──────────────────────────────────────────────────────────────────
@@ -801,13 +825,29 @@ audio.register('fn-gameover', (a) => {
   a.noise({ dur: 1.6, gain: 0.1, type: 'bandpass', freq: 900, sweepTo: 300, q: 6 });
 });
 
-// ── Pointer ────────────────────────────────────────────────────────────────
-// Rate-based gyro aiming, no calibration flow: the pointer is live from the
-// first packet, and the learned gyro gain lives inside the Pointer itself.
-const pointer = new Pointer({});
-pointer.sensitivity = loadSensitivity() ?? 1;
-let lastSample = null;
-let lastSampleAt = 0;
+// ── Pointer, one per connected phone ────────────────────────────────────────
+// Rate-based gyro aiming, no calibration flow: each pointer is live from its
+// own phone's first packet, and the learned gyro gain lives inside the
+// Pointer itself — independently per phone, since two devices rarely share a
+// gyro convention. `inputs` is keyed by the server-assigned slot (see
+// server.js); slot 0 always exists so mouse/keyboard desk-testing keeps
+// working with no phone attached at all, exactly as before multiplayer.
+const inputs = new Map();   // slot → { pointer, lastSampleAt }
+
+function inputFor(slot) {
+  let inp = inputs.get(slot);
+  if (!inp) {
+    const p = new Pointer({});
+    // Only slot 0's sensitivity is persisted (see the 'speed' command below
+    // for why); every other slot starts at the default.
+    p.sensitivity = (slot === 0 ? loadSensitivity() : null) ?? 1;
+    p.setViewport(window.innerWidth, window.innerHeight);
+    inp = { pointer: p, lastSampleAt: 0 };
+    inputs.set(slot, inp);
+  }
+  return inp;
+}
+inputFor(0);   // always present, for the desk-testing mouse/keyboard fallback
 
 function resize() {
   const w = Math.max(1, window.innerWidth);
@@ -816,7 +856,7 @@ function resize() {
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
   game.setAspect(camera.aspect);
-  pointer.setViewport(w, h);
+  for (const inp of inputs.values()) inp.pointer.setViewport(w, h);
 }
 window.addEventListener('resize', resize);
 
@@ -837,45 +877,70 @@ function toScreen(x, y) {
   };
 }
 
+/** Re-centre one phone's blade; names the player once there's more than one. */
+function recentreSlot(slot) {
+  inputFor(slot).pointer.recentre();
+  flash(link.controllers > 1 ? `P${slot + 1} re-centred` : 're-centred');
+}
+
 const link = new GameLink({
-  onOrientation: (sample) => {
+  onOrientation: (sample, slot) => {
     const now = performance.now();
-    const dt = lastSampleAt ? clamp((now - lastSampleAt) / 1000, 1 / 240, 0.1) : 1 / 60;
-    lastSampleAt = now;
-    lastSample = sample;
-    pointer.update(sample, dt, now);
+    const inp = inputFor(slot);
+    const dt = inp.lastSampleAt ? clamp((now - inp.lastSampleAt) / 1000, 1 / 240, 0.1) : 1 / 60;
+    inp.lastSampleAt = now;
+    inp.pointer.update(sample, dt, now);
   },
-  onCommand: (cmd) => {
-    if (cmd.type === 'calibrate') quickRecentre();
-    else if (cmd.type === 'recentre') quickRecentre();
+  onCommand: (cmd, slot) => {
+    if (cmd.type === 'calibrate' || cmd.type === 'recentre') recentreSlot(slot);
     else if (cmd.type === 'start') beginPlay();
     else if (cmd.type === 'button' && cmd.button === 'A') beginPlay();
     // B returns to the menu, so the whole loop is reachable from the phone.
     else if (cmd.type === 'button' && cmd.button === 'B') window.location.href = '/';
     else if (cmd.type === 'speed') {
-      pointer.sensitivity = clamp(pointer.sensitivity * (cmd.factor || 1), 0.2, 6);
-      saveSensitivity(pointer.sensitivity);
-      flash(`pointer speed ${(pointer.sensitivity * 100).toFixed(0)}%`);
+      const inp = inputFor(slot);
+      inp.pointer.sensitivity = clamp(inp.pointer.sensitivity * (cmd.factor || 1), 0.2, 6);
+      // Only slot 0 is persisted: one shared localStorage key can't hold
+      // four players' preferences, and slot 0 is the phone guaranteed to be
+      // around across sessions (solo play). Others adjust for the session.
+      if (slot === 0) saveSensitivity(inp.pointer.sensitivity);
+      const label = link.controllers > 1 ? `P${slot + 1} speed` : 'pointer speed';
+      flash(`${label} ${(inp.pointer.sensitivity * 100).toFixed(0)}%`);
     }
   },
-  onPresence: ({ controller }) => {
-    const on = controller > 0;
+  onPresence: (p) => {
+    const on = p.controller > 0;
     $('dot').classList.toggle('on', on);
-    $('link-t').textContent = on ? 'remote connected' : 'no remote connected';
+    $('link-t').textContent = on
+      ? (p.controller > 1 ? `${p.controller} remotes connected` : 'remote connected')
+      : 'no remote connected';
+    // A departed phone's blade shouldn't hang in the air forever. logic.js's
+    // staleness cutoff already stops it from cutting fruit, but the visible
+    // cursor should vanish right away rather than freeze at its last spot.
+    for (const s of p.slots || []) {
+      if (s.occupied) continue;
+      const player = game.players.get(s.slot);
+      if (player) { player.cursor.active = false; player.trail.clear(); }
+    }
+    syncHud();
   },
 });
 
 // ── DOM effects: splash text, the red miss ✗, the bomb flash ──────────────
-function splash(worldX, worldY, text, cls = '') {
+function splash(worldX, worldY, text, cls = '', colour = null) {
   const el = document.createElement('div');
   el.className = `splash ${cls}`;
   el.textContent = text;
+  if (colour) el.style.color = colour;
   const p = toScreen(worldX, worldY);
   el.style.left = `${p.x}px`;
   el.style.top = `${p.y}px`;
   $('fx').appendChild(el);
   setTimeout(() => el.remove(), 950);
 }
+
+/** CSS colour for a slot's blade, so its floating "+n" reads as theirs. */
+const cssTint = (slot) => `#${tintFor(slot).core.toString(16).padStart(6, '0')}`;
 
 let missTimer = 0;
 function missFlash(worldX) {
@@ -919,14 +984,16 @@ function handleEvent(e) {
     if (e.critical) {
       audio.play('fn-critical');
       splash(e.x, e.y, 'CRITICAL', 'crit');
-      splash(e.x, e.y - 0.9, `+${e.gained}`, 'plus');
+      splash(e.x, e.y - 0.9, `+${e.gained}`, 'plus', cssTint(e.slot));
     } else if (e.combo >= 3) {
       audio.play('fn-combo', { combo: e.combo });
       splash(e.x, e.y, `COMBO ×${e.combo}`, 'combo');
     } else {
-      splash(e.x, e.y, `+${e.gained}`, 'plus');
+      splash(e.x, e.y, `+${e.gained}`, 'plus', cssTint(e.slot));
     }
-    link.feedback({ type: 'slice', combo: e.combo });
+    // Only the phone that landed the cut feels it — see server.js: a
+    // feedback message with a slot targets that one controller.
+    link.feedback({ type: 'slice', combo: e.combo, slot: e.slot });
   } else if (e.type === 'bomb') {
     audio.play('explode');
     bombFlash();
@@ -966,11 +1033,24 @@ function syncHud() {
     xs[i].classList.toggle('lost', !game.infiniteLives && i >= game.state.lives);
   }
   $('practice').style.display = game.infiniteLives ? '' : 'none';
-}
 
-function quickRecentre() {
-  pointer.recentre();
-  flash('re-centred');
+  // Multiplayer scoreboard: everyone's individual score, on the shared
+  // board — only shown once a second phone actually joins, so solo play's
+  // HUD is pixel-identical to before this existed.
+  const board = $('players');
+  const connected = (link.slots || [])
+    .map((s, slot) => ({ slot, occupied: s.occupied }))
+    .filter((s) => s.occupied);
+  if (connected.length > 1) {
+    board.classList.add('on');
+    board.innerHTML = connected.map(({ slot }) => {
+      const p = game.getPlayer(slot);
+      return `<div class="prow"><span class="pdot" style="background:${cssTint(slot)}"></span>`
+        + `P${slot + 1} <b>${p.score}</b></div>`;
+    }).join('');
+  } else {
+    board.classList.remove('on');
+  }
 }
 
 function startGame() {
@@ -1030,16 +1110,21 @@ function frame(now) {
     fpsMark = now;
   }
 
-  if (!pointer.live && mouse.active) pointer.setFromMouse(mouse.x, mouse.y);
-  if (pointer.live && now - pointer.lastSeen > 500) pointer.live = false;
+  // Mouse fallback only ever stands in for slot 0 — there's one mouse.
+  const in0 = inputFor(0);
+  if (!in0.pointer.live && mouse.active) in0.pointer.setFromMouse(mouse.x, mouse.y);
 
-  // Drive the blade every frame, not every packet. The trail is sampled here
-  // too, so its speed window sees display-rate motion rather than packet-rate
-  // steps — which is what the slice threshold is tuned against.
-  if (pointer.live || mouse.active) {
-    const aim = pointer.sampleAt(now);
-    const p = toWorld(aim.x, aim.y);
-    game.setCursor(p.x, p.y, now);
+  // Drive every connected phone's blade every frame, not every packet. The
+  // trail is sampled here too, so its speed window sees display-rate motion
+  // rather than packet-rate steps — which is what the slice threshold is
+  // tuned against.
+  for (const [slot, inp] of inputs) {
+    if (inp.pointer.live && now - inp.pointer.lastSeen > 500) inp.pointer.live = false;
+    if (inp.pointer.live || (slot === 0 && mouse.active)) {
+      const aim = inp.pointer.sampleAt(now);
+      const p = toWorld(aim.x, aim.y);
+      game.setCursor(p.x, p.y, now, slot);
+    }
   }
 
   game.update(now, dt);
@@ -1059,21 +1144,23 @@ window.addEventListener('mousemove', (e) => {
 });
 window.addEventListener('pointerdown', () => audio.unlock());
 
+// Keyboard/desk fallback always addresses slot 0 — the one guaranteed input.
 window.addEventListener('keydown', (e) => {
   audio.unlock();
+  const p0 = inputFor(0).pointer;
   switch (e.key.toLowerCase()) {
     case ' ': e.preventDefault(); beginPlay(); break;
     case 'r':
-    case 'c': quickRecentre(); break;
+    case 'c': recentreSlot(0); break;
     case 'arrowright':
-      pointer.sensitivity = clamp(pointer.sensitivity * 1.12, 0.2, 6);
-      saveSensitivity(pointer.sensitivity);
-      flash(`pointer speed ${(pointer.sensitivity * 100).toFixed(0)}%`);
+      p0.sensitivity = clamp(p0.sensitivity * 1.12, 0.2, 6);
+      saveSensitivity(p0.sensitivity);
+      flash(`pointer speed ${(p0.sensitivity * 100).toFixed(0)}%`);
       break;
     case 'arrowleft':
-      pointer.sensitivity = clamp(pointer.sensitivity / 1.12, 0.2, 6);
-      saveSensitivity(pointer.sensitivity);
-      flash(`pointer speed ${(pointer.sensitivity * 100).toFixed(0)}%`);
+      p0.sensitivity = clamp(p0.sensitivity / 1.12, 0.2, 6);
+      saveSensitivity(p0.sensitivity);
+      flash(`pointer speed ${(p0.sensitivity * 100).toFixed(0)}%`);
       break;
     case 'd': $('debug').classList.toggle('on'); break;
     default: break;
@@ -1082,15 +1169,20 @@ window.addEventListener('keydown', (e) => {
 
 setInterval(() => {
   if (!$('debug').classList.contains('on')) return;
+  const p0 = inputFor(0).pointer;
+  const players = [...inputs.entries()]
+    .map(([slot, inp]) => `P${slot + 1}:${inp.pointer.hasGyro ? (inp.pointer.gyroTrusted ? '✓' : '…') : '–'}`)
+    .join(' ');
   $('debug').textContent = [
-    `mode        ${pointer.mode}`,
-    `gyro map    ${pointer.describeMap()}`,
-    `rate        ${pointer.rateDps.yaw.toFixed(1)} / ${pointer.rateDps.pitch.toFixed(1)} deg/s`,
-    `pointer     ${pointer.display.x.toFixed(3)}, ${pointer.display.y.toFixed(3)}`,
+    `mode        ${p0.mode}`,
+    `gyro map    ${p0.describeMap()}`,
+    `rate        ${p0.rateDps.yaw.toFixed(1)} / ${p0.rateDps.pitch.toFixed(1)} deg/s`,
+    `pointer     ${p0.display.x.toFixed(3)}, ${p0.display.y.toFixed(3)}`,
     `gesture     ${game.trail.speed().toFixed(2)} u/s`,
     `sensor rate ${link.rate.toFixed(0)} Hz`,
-    `source      ${pointer.source}`,
+    `source      ${p0.source}`,
     `fps         ${fps.toFixed(0)}`,
+    `players     ${players}`,
     `entities    ${game.fruits.length}f ${game.halves.length}h ${game.particles.length}p`,
     `meshes      ${meshes.size} · splats ${splats.length}`,
   ].join('\n');
@@ -1108,10 +1200,12 @@ audio.unlock();
 startGame();
 requestAnimationFrame(frame);
 
-// Exposed for the verification harness.
+// Exposed for the verification harness. `pointer` is slot 0's, kept for
+// scripts written against the old single-player shape; `inputs` is the full
+// per-slot map for multiplayer-aware verification.
 window.__openwii = {
-  game, pointer, audio, link, toWorld, toScreen,
-  scene, camera, renderer, meshes, splats,
+  game, pointer: inputFor(0).pointer, inputs, audio, link, toWorld, toScreen,
+  scene, camera, renderer, meshes, splats, visuals,
   syncScene, drawTrail, pruneMeshes,
   fps: () => fps,
 };

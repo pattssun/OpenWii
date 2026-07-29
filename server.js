@@ -187,8 +187,18 @@ io.on('connection', (socket) => {
   });
 
   // PC → phone feedback: hits (haptics), score, game state.
+  //
+  // A message with a `slot` goes to that one phone only — e.g. a multiplayer
+  // slice should buzz the hand that swung it, not every hand in the lobby.
+  // Anything without a slot broadcasts to every controller, unchanged from
+  // before slots existed — every existing single-player game's feedback
+  // calls omit it, so this is purely additive.
   socket.on('feedback', (data) => {
-    socket.to('controller').emit('feedback', data);
+    if (typeof data.slot === 'number' && slots[data.slot]) {
+      io.to(slots[data.slot]).emit('feedback', data);
+    } else {
+      socket.to('controller').emit('feedback', data);
+    }
   });
 
   socket.on('disconnect', () => {

@@ -45,7 +45,7 @@ actual phone control.
 
 | Game | | |
 | --- | --- | --- |
-| 🍉 **Fruit Ninja** | Swing the phone like a sword. Slice fruit, dodge bombs. | [`games/fruit-ninja`](games/fruit-ninja) |
+| 🍉 **Fruit Ninja** | Swing the phone like a sword. Slice fruit, dodge bombs. Up to 4 phones, same board. | [`games/fruit-ninja`](games/fruit-ninja) |
 | ⚔️ **Swordplay** | Duel a fencer foe — swing to strike, hold your blade to block. | [`games/swordplay`](games/swordplay) |
 | 🏓 **Table Tennis** | Track the ball, swing at contact for pace. First to 11. | [`games/table-tennis`](games/table-tennis) |
 | ⛳ **Golf** | Drive, approach, putt. Swing hard off the tee, soft on the green. | [`games/golf`](games/golf) |

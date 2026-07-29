@@ -48,6 +48,24 @@
     text-shadow: 0 0 2px #000, 1px 2px 0 #3a220c; margin-top: 4px; letter-spacing: .08em;
   }
 
+  /* Multiplayer scoreboard — hidden until a second phone joins the lobby. */
+  #players {
+    position: absolute; left: 50%; top: 18px; transform: translateX(-50%);
+    display: none; flex-direction: column; gap: 4px; align-items: center;
+    background: #1d1006cc; border: 1px solid #4a3319; border-radius: 14px;
+    padding: 10px 16px; backdrop-filter: blur(8px);
+  }
+  #players.on { display: flex; }
+  #players .prow {
+    font-family: "Permanent Marker", cursive; font-size: 17px; color: #f5ead6;
+    display: flex; align-items: center; gap: 8px; white-space: nowrap;
+  }
+  #players .prow b { color: #ffcf4d; }
+  #players .pdot {
+    width: 11px; height: 11px; border-radius: 50%; flex: none;
+    box-shadow: 0 0 6px currentColor, inset 0 0 0 1px #0006;
+  }
+
   /* Floating slice text. */
   #fx { position: absolute; inset: 0; overflow: hidden; }
   .splash {
@@ -155,6 +173,7 @@
     <div><span class="x">✗</span><span class="x">✗</span><span class="x">✗</span></div>
     <div id="practice">PRACTICE · ∞ LIVES</div>
   </div>
+  <div id="players"></div>
   <div id="fx"></div>
   <div id="miss-x">✗</div>
   <div id="flash"></div>
