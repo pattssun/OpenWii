@@ -288,13 +288,39 @@ grass grips a slow ball; now so does ours.
 
 ---
 
-## Phases 4–5
+## Phase 4 — Island Flyover
 
-Criteria firm up when each is reached; these are the headline bars.
+Free flight over a procedural island, collecting 20 i-point rings. The terrain
+is one deterministic height function (`islandHeight`) shared by the logic, the
+renderer and the ring placer — tests, mesh and gameplay all see the same
+island. Input is `gripTilt`: hold the phone flat like a paper plane, bank to
+turn, tip to climb or dive. Gentle by design, like the mode it honours: terrain
+and world edges push back, there is no crash state at all.
+
+**Acceptance — met 2026-07-28.** All mechanics in `npm test`; the full tour
+also flown end-to-end in the live page.
+
+| Criterion | Result |
+|---|---|
+| An island worth flying over (headline bar) | ✅ ~800m island with beach/lowland/forest/rock/snow height bands, central snow-capped peak, coastline test pins that land actually meets water |
+| Flight model | ✅ level tilt flies straight and holds altitude (<3m drift over 2s); banking turns the correct way; dive/climb trade speed |
+| Can't crash | ✅ a 1500-frame full dive never goes below the safety floor; flying straight out to sea, the soft edge steers back inside (max radius pinned) |
+| The tour is completable | ✅ headless: a blunt autopilot collects all 20 rings in under 8 sim-minutes; live page: same autopilot through the real channel/step path finishes 20/20, rings removed from scene, "Full sweep!" overlay with time |
+| Frame cost | ✅ 0.212 ms/frame with the full 130×130-segment island mesh + 20 animated rings — ~78× headroom |
+
+Spawn bug caught by the screenshot, not the tests: the plane started with
+`heading = π`, which in this flight model faces open sea, not the island. The
+autopilot turned around instantly so every test passed; only staging a visual
+made it obvious. Fixed — you now spawn facing the peak.
+
+---
+
+## Phase 5
+
+Criteria firm up when reached; this is the headline bar.
 
 | Phase | Game | Headline bar |
 |---|---|---|
-| 4 | Island Flyover | An island worth flying over. Highest art risk of the project: procedural geometry has to carry an entire explorable world. |
 | 5 | Mario Kart (time trial) | Tilt-steering that feels good enough to want a second lap. One circuit, a working lap timer, a ghost. |
 
 ## Risks

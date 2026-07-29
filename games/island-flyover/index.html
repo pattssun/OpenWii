@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Island Flyover — OpenWii</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden; cursor: none;
+    background: #9cd4f5; color: #1c3247;
+    font: 500 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    user-select: none;
+  }
+  canvas { display: block; position: absolute; inset: 0; width: 100%; height: 100%; }
+
+  #hud { position: absolute; inset: 0; pointer-events: none; }
+  #card {
+    position: absolute; left: 28px; top: 24px; background: #ffffffd0;
+    border: 1px solid #aecfe3; border-radius: 14px; padding: 12px 18px; text-align: center;
+  }
+  #count { font-size: 28px; font-weight: 800; }
+  #card small { font-size: 11px; color: #4c7089; text-transform: uppercase; letter-spacing: .12em; }
+  #timer { position: absolute; right: 30px; top: 24px; font-size: 26px; font-weight: 800;
+           color: #fff; text-shadow: 0 2px 10px #0005; font-variant-numeric: tabular-nums; }
+
+  #keys { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%);
+          font-size: 11px; color: #2f4d63; }
+  #keys a { color: inherit; pointer-events: auto; }
+  #link { position: absolute; right: 30px; bottom: 24px; display: flex; align-items: center;
+          gap: 9px; font-size: 13px; color: #2f4d63; background: #ffffffc4;
+          border: 1px solid #aecfe3; padding: 9px 14px; border-radius: 999px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #8fb0c4; }
+  .dot.on { background: #2fb56b; }
+  #debug { position: absolute; right: 30px; top: 72px; margin: 0; display: none;
+           background: #ffffffd9; border: 1px solid #aecfe3; border-radius: 12px;
+           padding: 13px 15px; font: 12px/1.6 ui-monospace, Menlo, monospace;
+           color: #2f4d63; white-space: pre; }
+  #debug.on { display: block; }
+
+  #overlay { position: absolute; inset: 0; display: grid; place-items: center; z-index: 5;
+             background: radial-gradient(ellipse at 50% 40%, #cfeafbe8, #9cd4f5f2 70%); }
+  #overlay.hide { display: none; }
+  .panel { text-align: center; max-width: 560px; padding: 0 30px; }
+  .panel h1 { font-size: 54px; margin: 0 0 8px; font-weight: 800; letter-spacing: -0.03em; }
+  .panel h1 em { font-style: normal;
+    background: linear-gradient(120deg, #1d6fd1, #2c9e57);
+    -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .panel p { color: #3c5d75; margin: 0 auto 24px; max-width: 440px; }
+  .cta { font-size: 14px; color: #3c5d75; }
+  .cta strong { color: #1c3247; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud">
+  <div id="card"><div id="count">0 / 20</div><small>i-points</small></div>
+  <div id="timer">0:00</div>
+  <div id="keys"><a href="/">← Games</a> · hold the phone flat like a paper plane ·
+    bank to turn, tip to climb or dive · <b>A</b>/Space start · arrows on desk · <b>D</b> debug</div>
+  <div id="link"><span class="dot" id="dot"></span><span id="link-t">no remote connected</span></div>
+  <pre id="debug"></pre>
+</div>
+
+<div id="overlay">
+  <div class="panel" id="panel">
+    <h1>🛩 <em>Island Flyover</em></h1>
+    <p>Free flight over the island. Hold the phone flat like a paper plane —
+       bank to turn, tip the nose to climb or dive — and fly through all 20
+       golden rings. You can't crash; explore.</p>
+    <div class="cta"><strong>A</strong> or <strong>Space</strong> to take off · <strong>B</strong> menu</div>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script type="module" src="game.js"></script>
+</body>
+</html>
