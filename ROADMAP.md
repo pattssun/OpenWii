@@ -238,6 +238,40 @@ swapped-axes, mirrored and rad/s phones all learn, earn trust and track within
 vertical swings stay vertical in flat, upright and landscape grips; 100ms of
 orientation lag doesn't slow the cursor; 300ms degrades to correct-but-soft.
 
+---
+
+## Phase 2 — Swordplay (reference game)
+
+The game that sets the bar for every one after it. Judged on feel.
+
+**Acceptance — met 2026-07-28.** All mechanics covered headlessly by `npm test`.
+
+| Criterion | Result |
+|---|---|
+| Blade tracks the phone 1:1 (roll, pitch, yaw) | ✅ `swordBasis` is the attitude itself; fidelity pinned numerically to <0.01° at 10/35/80° pitch and 40° roll |
+| Blocking is blade geometry, not timing | ✅ perpendicular blocks, parallel takes the hit, 45° off fails — and a perpendicular blade **mid-swing** does not block (the guard must be held) |
+| Swing vs wave discrimination | ✅ shared `SwingDetector`: an 80°/s wave never fires, a fast-but-tiny jerk is rejected on travel, a held rotation times out, two slashes emit two events with correct directions |
+| Full match vs AI, win and loss | ✅ both endings verified headlessly *and* through the live page (HUD, overlays, haptic feedback) |
+| O2 during combat | ✅ 0.75 ms/frame under a staged combat pose (22× headroom); transport unchanged from Phase 0's measured path |
+
+Design notes worth keeping: the AI telegraphs strikes with a red ring, and its
+guard is an angle you must swing *around* — attacking is aiming, not mashing.
+Extracted this phase, now that a second game made the duplication real:
+`core/channel.js` (per-game wiring), `core/gesture.js` (SwingDetector), and
+`gripTilt` (the steering/flight input for Phases 4–5).
+
+---
+
+## Phases 3–5
+
+Criteria firm up when each is reached; these are the headline bars.
+
+| Phase | Game | Headline bar |
+|---|---|---|
+| 3 | Table Tennis + Golf | Built together — both are "swing at a ball", so they share a physics and swing-detection module. A rally is sustainable; a golf ball is landable on a green. |
+| 4 | Island Flyover | An island worth flying over. Highest art risk of the project: procedural geometry has to carry an entire explorable world. |
+| 5 | Mario Kart (time trial) | Tilt-steering that feels good enough to want a second lap. One circuit, a working lap timer, a ghost. |
+
 ## Risks
 
 **The core bar is subjective and cannot be automated.** Every metric above can
