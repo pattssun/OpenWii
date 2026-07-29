@@ -262,13 +262,38 @@ Extracted this phase, now that a second game made the duplication real:
 
 ---
 
-## Phases 3–5
+## Phase 3 — Table Tennis + Golf
+
+Built together on a shared module, as planned: `games/shared/ball.js` is one
+ball-physics path (gravity, drag, bounce, slope-aware rolling) parameterised by
+a height function — a flat table and rolling golf terrain are the same code.
+Swing detection is the Phase 2 `SwingDetector` unchanged.
+
+**Acceptance — met 2026-07-28.** All mechanics in `npm test`; both games also
+driven end-to-end in the live pages.
+
+| Criterion | Result |
+|---|---|
+| A rally is sustainable (headline bar) | ✅ 18-hit rally in the live page with a tracked paddle; headless test pins ≥8. Serves and returns verified to clear the net and land in the far half |
+| Position is the skill | ✅ a paddle off the ball's line loses the point; a swing at contact adds pace (boost decays, so it must be timed) |
+| Game completes | ✅ first to 11, winner declared, both HUD and overlay driven by real events |
+| A golf ball is landable on the green (headline bar) | ✅ power-scan proof: an iron from 100m finishes inside the 11m green radius; a makeable 6m putt exists (the cup only takes a slow ball) |
+| A whole hole is completable | ✅ scripted naive player holes out ≤9 strokes on the par-4; strokes counted; birdie/bogey naming on the card |
+| Frame cost | ✅ tennis 0.60 ms, golf 1.15 ms (full 60×120-segment terrain mesh) — 14–28× headroom |
+
+One physics bug worth remembering: without static friction, slope pull against
+rolling decay settles at a terminal creep (~0.25 m/s), so a golf ball never
+stopped on any slope and the hole never returned to the aiming state. Real
+grass grips a slow ball; now so does ours.
+
+---
+
+## Phases 4–5
 
 Criteria firm up when each is reached; these are the headline bars.
 
 | Phase | Game | Headline bar |
 |---|---|---|
-| 3 | Table Tennis + Golf | Built together — both are "swing at a ball", so they share a physics and swing-detection module. A rally is sustainable; a golf ball is landable on a green. |
 | 4 | Island Flyover | An island worth flying over. Highest art risk of the project: procedural geometry has to carry an entire explorable world. |
 | 5 | Mario Kart (time trial) | Tilt-steering that feels good enough to want a second lap. One circuit, a working lap timer, a ghost. |
 
