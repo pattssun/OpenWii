@@ -852,6 +852,11 @@ const link = new GameLink({
     else if (cmd.type === 'button' && cmd.button === 'A') beginPlay();
     // B returns to the menu, so the whole loop is reachable from the phone.
     else if (cmd.type === 'button' && cmd.button === 'B') window.location.href = '/';
+    else if (cmd.type === 'speed') {
+      pointer.sensitivity = clamp(pointer.sensitivity * (cmd.factor || 1), 0.2, 6);
+      saveSensitivity(pointer.sensitivity);
+      flash(`pointer speed ${(pointer.sensitivity * 100).toFixed(0)}%`);
+    }
   },
   onPresence: ({ controller }) => {
     const on = controller > 0;

@@ -40,7 +40,10 @@ export function createChannel({
       if (cmd.type === 'button' && cmd.button === 'A') { audio.unlock(); onA(); }
       else if (cmd.type === 'button' && cmd.button === 'B') onB();
       else if (cmd.type === 'calibrate' || cmd.type === 'recentre') pointer.recentre();
-      else onCommand(cmd);
+      else if (cmd.type === 'speed') {
+        pointer.sensitivity = clamp(pointer.sensitivity * (cmd.factor || 1), 0.2, 6);
+        saveSensitivity(pointer.sensitivity);
+      } else onCommand(cmd);
     },
     onPresence: ({ controller }) => {
       const on = controller > 0;

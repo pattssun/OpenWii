@@ -428,6 +428,11 @@ const link = new GameLink({
     if (cmd.type === 'button' && cmd.button === 'A') pressA();
     else if (cmd.type === 'button' && cmd.button === 'B') pressB();
     else if (cmd.type === 'calibrate' || cmd.type === 'recentre') quickRecentre();
+    else if (cmd.type === 'speed') {
+      pointer.sensitivity = clamp(pointer.sensitivity * (cmd.factor || 1), 0.2, 6);
+      saveSensitivity(pointer.sensitivity);
+      showSpeed();
+    }
   },
   onPresence: ({ controller }) => {
     const on = controller > 0;

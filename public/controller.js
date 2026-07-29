@@ -1,33 +1,94 @@
 'use strict';
 
 /**
- * Phone controller — reads DeviceOrientation/DeviceMotion and streams it to the
- * PC game client at ~60Hz.
+ * Phone controller — a Wii-remote face that reads DeviceOrientation /
+ * DeviceMotion and streams it to the PC game client at ~60Hz.
  *
  * Sensor events fire at their own cadence (60Hz on iOS, sometimes faster on
  * Android). Rather than emit on every event, we latch the newest sample and
- * flush it on requestAnimationFrame — that hard-caps the wire rate at the
- * display refresh and guarantees we always send the *freshest* reading.
+ * flush it immediately, rate-capped — that guarantees we always send the
+ * *freshest* reading without flooding the wire.
+ *
+ * The UI is the remote itself: A/B, the −⌂+ row, 1/2, a speaker grille that
+ * lights up when the remote "speaks" (slice haptics + a little swoosh from the
+ * phone, the way the real one did it), and player LEDs that blink while
+ * pairing and go solid on a slot.
  */
 
 const socket = io({ transports: ['websocket', 'polling'] });
 
 const $ = (id) => document.getElementById(id);
 const els = {
-  net: $('net'), dotNet: $('dot-net'), hz: $('hz'),
-  gate: $('gate'), live: $('live'), enable: $('enable'),
-  recentre: $("recentre"),
-  btnA: $("btn-a"), btnB: $("btn-b"),
-  yaw: $('v-yaw'), pitch: $('v-pitch'), roll: $('v-roll'),
-  canvas: $('c'), cal: $('cal'), calTitle: $('cal-title'), calBody: $('cal-body'),
+  net: $('net'), dotNet: $('dot-net'), hz: $('hz'), player: $('player'),
+  gate: $('gate'), enable: $('enable'),
+  remote: $('remote'), stage: $('stage'),
+  btnA: $('btn-a'), btnB: $('btn-b'),
+  btnHome: $('btn-home'), btnMinus: $('btn-minus'), btnPlus: $('btn-plus'),
+  btn1: $('btn-1'), btn2: $('btn-2'), power: $('power'),
+  speaker: $('speaker'), leds: $('leds'), sheet: $('sheet'),
   rates: $('rates'), diag: $('diag'), diagBody: $('diag-body'),
-  player: $("player"),
   diagTitle: $('diag-title'), diagDump: $('diag-dump'),
 };
 
 let enabledAt = 0;   // when the user granted sensor permission
-
 let gameConnected = false;
+
+// ── Haptics + the remote's little speaker ──────────────────────────────────
+const buzz = (pattern) => { if (navigator.vibrate) navigator.vibrate(pattern); };
+
+/**
+ * The real remote's party trick was sound from your hand. A tiny synth stands
+ * in for it: a swoosh on a slice, a thud on a bomb, a click on A.
+ */
+let actx = null;
+function phoneAudioUnlock() {
+  if (actx) return;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  try { actx = new Ctx(); } catch { /* no audio, no problem */ }
+}
+
+function pSound(kind) {
+  if (!actx || actx.state !== 'running') { if (actx) actx.resume(); return; }
+  const t0 = actx.currentTime;
+  const g = actx.createGain();
+  g.connect(actx.destination);
+  if (kind === 'click') {
+    const o = actx.createOscillator();
+    o.type = 'square'; o.frequency.value = 660;
+    g.gain.setValueAtTime(0.05, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.05);
+    o.connect(g); o.start(t0); o.stop(t0 + 0.06);
+  } else if (kind === 'swoosh') {
+    const frames = Math.floor(actx.sampleRate * 0.12);
+    const buf = actx.createBuffer(1, frames, actx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < frames; i += 1) d[i] = (Math.random() * 2 - 1) * (1 - i / frames);
+    const src = actx.createBufferSource();
+    src.buffer = buf;
+    const f = actx.createBiquadFilter();
+    f.type = 'bandpass'; f.Q.value = 1.2;
+    f.frequency.setValueAtTime(2400, t0);
+    f.frequency.exponentialRampToValueAtTime(500, t0 + 0.12);
+    g.gain.value = 0.12;
+    src.connect(f).connect(g); src.start(t0);
+  } else if (kind === 'thud') {
+    const o = actx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(160, t0);
+    o.frequency.exponentialRampToValueAtTime(50, t0 + 0.25);
+    g.gain.setValueAtTime(0.18, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.28);
+    o.connect(g); o.start(t0); o.stop(t0 + 0.3);
+  }
+}
+
+let talkTimer = 0;
+function speakerTalk(ms = 220) {
+  els.speaker.classList.add('talk');
+  clearTimeout(talkTimer);
+  talkTimer = setTimeout(() => els.speaker.classList.remove('talk'), ms);
+}
 
 // ── Connection status ──────────────────────────────────────────────────────
 function setNet(text, state) {
@@ -35,63 +96,64 @@ function setNet(text, state) {
   els.dotNet.className = `dot ${state || ''}`;
 }
 
+function syncLeds() {
+  const linked = gameConnected && playerSlot !== null;
+  els.leds.classList.toggle('seek', !linked);
+  const lights = els.leds.children;
+  for (let i = 0; i < lights.length; i += 1) {
+    lights[i].classList.toggle('on', linked && i === playerSlot);
+  }
+}
+
 socket.on('connect', () => {
   socket.emit('register', 'controller');
   setNet('waiting for PC…', '');
+  syncLeds();
 });
-socket.on('disconnect', () => setNet('disconnected', 'err'));
+socket.on('disconnect', () => { setNet('disconnected', 'err'); gameConnected = false; syncLeds(); });
 socket.on('connect_error', () => setNet('server unreachable', 'err'));
 
 socket.on('presence', ({ game }) => {
   gameConnected = game > 0;
   setNet(gameConnected ? 'linked to PC' : 'waiting for PC…', gameConnected ? 'on' : '');
+  if (gameConnected) buzz(15);
+  syncLeds();
 });
 
 // Latency probe — echo straight back. The PC times the round trip, because a
 // one-way timestamp would need the two devices' clocks to agree, and they don't.
 socket.on('ping-probe', ({ id }) => socket.emit('pong-probe', { id }));
 
-let playerSlot = 0;
+let playerSlot = null;
 socket.on('slot', ({ slot }) => {
   playerSlot = slot;
-  els.player.textContent = `Player ${slot + 1}`;
+  els.player.textContent = `P${slot + 1}`;
   els.player.classList.remove('hide');
+  syncLeds();
 });
 socket.on('slot-denied', ({ max }) => {
   setNet(`all ${max} player slots are full`, 'err');
 });
 
-// Calibration prompts mirrored from the PC — you're holding the phone, not
-// looking at the monitor, so the instructions have to be here too.
-const CAL_COPY = {
-  signal: ['📡 Connecting', 'Waiting for sensor data…'],
-  steady: ['🧍 Hold still', 'Point it at the screen and keep it steady — measuring your hand.'],
-  range: ['🌀 Swing it around', 'Left and right, then up AND down. It ends when you stop.'],
-  done: ['🎮 Ready', 'Point and swing.'],
-};
-
-function showCalibration(step) {
-  const copy = CAL_COPY[step] || CAL_COPY.done;
-  els.calTitle.textContent = copy[0];
-  els.calBody.textContent = copy[1];
-  els.cal.classList.toggle('active', step !== 'done');
-}
-
+// Game feedback lands in the hand: haptics + the speaker grille lighting up.
 socket.on('feedback', (msg) => {
-  if (msg.type === 'calibration') {
-    showCalibration(msg.step);
-    if (navigator.vibrate && msg.step === 'range') navigator.vibrate(30);
-    return;
+  if (msg.type === 'slice') {
+    buzz(msg.combo > 2 ? [12, 18, 22] : 18);
+    speakerTalk();
+    pSound('swoosh');
+  } else if (msg.type === 'bomb') {
+    buzz([60, 40, 120]);
+    speakerTalk(500);
+    pSound('thud');
+  } else if (msg.type === 'miss') {
+    buzz(8);
+  } else if (msg.type === 'launch') {
+    speakerTalk(120);
   }
-  // Haptics on a slice — the whole point of holding a real object.
-  if (!navigator.vibrate) return;
-  if (msg.type === 'slice') navigator.vibrate(msg.combo > 2 ? [12, 18, 22] : 18);
-  else if (msg.type === 'bomb') navigator.vibrate([60, 40, 120]);
-  else if (msg.type === 'miss') navigator.vibrate(8);
 });
 
 // ── Sensor plumbing ────────────────────────────────────────────────────────
-let latest = null;      // newest orientation sample, flushed on rAF
+let latest = null;      // newest orientation sample, flushed rate-capped
 let motion = null;      // newest acceleration sample
 let streaming = false;
 let rawEvents = 0;      // orientation events fired, including empty ones
@@ -132,11 +194,8 @@ function onOrientation(e) {
 /**
  * Send the moment the sensor speaks.
  *
- * This used to latch the newest sample and flush it on the phone's own
- * requestAnimationFrame, to cap the wire rate. But rAF is tied to the phone's
- * display refresh, so it added up to a full frame of pure delay before the
- * packet even left the device — and the rate cap below does the same job
- * without costing anything.
+ * rAF-latching added up to a full frame of pure delay before the packet even
+ * left the device — the rate cap below does the same job for free.
  */
 const MIN_EMIT_MS = 6;    // ~166Hz ceiling; real sensors run well under this
 let lastEmit = 0;
@@ -209,6 +268,7 @@ async function renderDiagnostics(headline, detail) {
   const caps = capabilities();
   const perms = await sensorPermissionStates();
   els.diag.classList.remove('hide');
+  els.sheet.classList.add('open');
   els.diagTitle.textContent = headline;
   els.diagBody.textContent = detail;
   els.diagDump.textContent = JSON.stringify({ ...caps, ...perms, ua: navigator.userAgent }, null, 1);
@@ -316,13 +376,15 @@ async function requestSensors() {
 
 els.enable.addEventListener('click', async () => {
   els.enable.disabled = true;
+  phoneAudioUnlock();
   try {
     await requestSensors();
     streaming = true;
     enabledAt = performance.now();
     els.gate.classList.add('hide');
-    els.live.classList.remove('hide');
-    resizeViz();
+    els.remote.classList.remove('asleep');
+    buzz([10, 40, 18]);
+    speakerTalk(400);
     keepAwake();
     // Zero the mapping the moment the sword goes live.
     socket.emit('command', { type: 'calibrate' });
@@ -332,17 +394,37 @@ els.enable.addEventListener('click', async () => {
   }
 });
 
-els.recentre.addEventListener('click', () => socket.emit('command', { type: 'recentre' }));
-
-// A and B. Sent on pointerdown rather than click so the press lands as soon as
-// the finger does — a click waits for release, which reads as lag on a remote.
-for (const [el, button] of [[els.btnA, 'A'], [els.btnB, 'B']]) {
+// ── The remote's buttons ───────────────────────────────────────────────────
+// Everything sends on pointerdown, not click — a click waits for the finger to
+// lift, which reads as lag when you're holding a remote.
+function onPress(el, fn, pattern = 10) {
   el.addEventListener('pointerdown', (e) => {
     e.preventDefault();
-    socket.emit('command', { type: 'button', button });
-    if (navigator.vibrate) navigator.vibrate(10);
+    buzz(pattern);
+    fn();
   });
 }
+
+onPress(els.btnA, () => { socket.emit('command', { type: 'button', button: 'A' }); pSound('click'); }, 12);
+onPress(els.btnB, () => socket.emit('command', { type: 'button', button: 'B' }), 10);
+// HOME does what it did on the console: back to the menu.
+onPress(els.btnHome, () => socket.emit('command', { type: 'button', button: 'B' }), 10);
+onPress(els.btnMinus, () => socket.emit('command', { type: 'speed', factor: 1 / 1.12 }), 6);
+onPress(els.btnPlus, () => socket.emit('command', { type: 'speed', factor: 1.12 }), 6);
+onPress(els.btn1, () => socket.emit('command', { type: 'recentre' }), 8);
+onPress(els.btn2, () => els.sheet.classList.toggle('open'), 8);
+onPress(els.power, () => speakerTalk(250), [5, 30, 10]);
+for (const dp of document.querySelectorAll('.dp')) {
+  if (dp.tagName === 'BUTTON') onPress(dp, () => {}, 6);
+}
+
+// Tap outside the sheet to close it.
+document.addEventListener('pointerdown', (e) => {
+  if (els.sheet.classList.contains('open')
+      && !els.sheet.contains(e.target) && e.target !== els.btn2) {
+    els.sheet.classList.remove('open');
+  }
+});
 
 /** Stop the screen sleeping mid-game; the phone gets no touch input while swinging. */
 async function keepAwake() {
@@ -358,7 +440,7 @@ async function keepAwake() {
   } catch { /* not fatal */ }
 }
 
-// ── 60Hz flush loop ────────────────────────────────────────────────────────
+// ── Readouts + the remote tilting in your hand ─────────────────────────────
 let sent = 0;
 let hzMark = performance.now();
 let lastSensorCount = 0;
@@ -400,34 +482,9 @@ function transportName() {
   }
 }
 
-function tick(now) {
-  requestAnimationFrame(tick);
-
-  // Sending happens in flush(), on the sensor event. This loop is only for the
-  // on-screen readouts, which have no reason to be on the latency path.
-  if (streaming && latest) {
-    const a = displayAngles(latest);
-    els.yaw.textContent = Math.round(a.yaw);
-    els.pitch.textContent = Math.round(a.pitch);
-    els.roll.textContent = Math.round(a.roll);
-    drawViz(a);
-  }
-
-  // Outside the guard above: the "no sensor data" warning has to run precisely
-  // when there is no sensor data, which is exactly when `latest` stays null.
-  if (now - hzMark >= 1000) {
-    updateDiagnostics(now, now - hzMark);
-    sent = 0;
-    hzMark = now;
-  }
-}
-requestAnimationFrame(tick);
-
 /**
- * Angles purely for the on-screen readout — the PC does its own decoding from
- * whichever representation arrives. Quaternion samples are reduced to the
- * heading/elevation of the phone's top edge, which is the intuitive thing to
- * watch while you wave it about.
+ * Angles purely for the on-screen tilt — the PC does its own decoding from
+ * whichever representation arrives.
  */
 function displayAngles(sample) {
   if (!sample.quat) {
@@ -443,54 +500,33 @@ function displayAngles(sample) {
   };
 }
 
-// ── Tilt visualiser ────────────────────────────────────────────────────────
-const ctx = els.canvas.getContext('2d');
-let vw = 0;
-let vh = 0;
+// The remote leans with the real one — a small parallax that makes the page
+// feel like an object rather than a form. Smoothed so it drifts, not jitters.
+const lean = { x: 0, y: 0 };
+const clampN = (v, m) => Math.max(-m, Math.min(m, v));
 
-function resizeViz() {
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const r = els.canvas.getBoundingClientRect();
-  vw = r.width;
-  vh = r.height;
-  els.canvas.width = Math.round(vw * dpr);
-  els.canvas.height = Math.round(vh * dpr);
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+function tick(now) {
+  requestAnimationFrame(tick);
+
+  if (streaming && latest) {
+    const a = displayAngles(latest);
+    // beta ≈ 45° is a natural hold; lean relative to that, gently.
+    const tx = clampN((a.pitch - 40) * 0.14, 7);
+    const ty = clampN((a.roll || 0) * 0.18, 9);
+    lean.x += (tx - lean.x) * 0.12;
+    lean.y += (ty - lean.y) * 0.12;
+    els.remote.style.transform = `rotateX(${(-lean.x).toFixed(2)}deg) rotateY(${lean.y.toFixed(2)}deg)`;
+  }
+
+  // Outside the guard above: the "no sensor data" warning has to run precisely
+  // when there is no sensor data, which is exactly when `latest` stays null.
+  if (now - hzMark >= 1000) {
+    updateDiagnostics(now, now - hzMark);
+    sent = 0;
+    hzMark = now;
+  }
 }
-window.addEventListener('resize', resizeViz);
-
-function drawViz(angles) {
-  if (!vw || !latest) return;
-  ctx.clearRect(0, 0, vw, vh);
-
-  const cx = vw / 2;
-  const cy = vh / 2;
-  const len = Math.min(vw, vh) * 0.36;
-
-  // Blade angle mirrors roll; length shortens as the phone pitches away.
-  const roll = (angles.roll * Math.PI) / 180;
-  const lean = Math.cos((angles.pitch * Math.PI) / 180);
-
-  ctx.strokeStyle = '#232a3b';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.arc(cx, cy, len, 0, Math.PI * 2);
-  ctx.stroke();
-
-  const dx = Math.sin(roll) * len * lean;
-  const dy = -Math.cos(roll) * len * Math.abs(lean);
-
-  const grad = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy);
-  grad.addColorStop(0, '#2b3448');
-  grad.addColorStop(1, '#ff5f6d');
-  ctx.strokeStyle = grad;
-  ctx.lineWidth = 6;
-  ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.moveTo(cx - dx, cy - dy);
-  ctx.lineTo(cx + dx, cy + dy);
-  ctx.stroke();
-}
+requestAnimationFrame(tick);
 
 // Kill pull-to-refresh / rubber-banding so swinging never scrolls the page.
 document.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });

@@ -5,140 +5,285 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="mobile-web-app-capable" content="yes" />
-<meta name="theme-color" content="#0b0e14" />
+<meta name="theme-color" content="#10141c" />
 <title>Remote — OpenWii</title>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body {
     margin: 0; height: 100%; overflow: hidden;
-    background: #0b0e14; color: #e8ecf4;
+    background: radial-gradient(ellipse at 50% 20%, #1a2130, #10141c 70%);
+    color: #e8ecf4;
     font: 500 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     overscroll-behavior: none; touch-action: none; user-select: none;
   }
   #app {
     height: 100%;
-    padding: max(20px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom));
-    display: flex; flex-direction: column; gap: 18px;
+    padding: max(10px, env(safe-area-inset-top)) 16px max(10px, env(safe-area-inset-bottom));
+    display: flex; flex-direction: column; gap: 10px;
   }
-  h1 { margin: 0; font-size: 22px; letter-spacing: -0.02em; font-weight: 700; }
-  h1 span { opacity: 0.5; font-weight: 500; }
 
-  .card {
-    background: #141926; border: 1px solid #232a3b; border-radius: 16px; padding: 16px;
+  /* ── Slim status bar ─────────────────────────────────────────────────── */
+  #topbar {
+    display: flex; align-items: center; gap: 9px; font-size: 12px; color: #8b95ad;
+    padding: 7px 12px; background: #ffffff10; border: 1px solid #ffffff14;
+    border-radius: 999px; flex: none;
   }
-  .muted { color: #8b95ad; font-size: 14px; }
-
-  button {
-    font: inherit; font-weight: 600; color: inherit;
-    border: 1px solid #232a3b; border-radius: 14px; background: #1b2231;
-    padding: 16px; width: 100%; transition: transform .08s ease, background .15s ease;
-  }
-  button:active { transform: scale(0.98); background: #232c40; }
-  button.primary {
-    background: linear-gradient(160deg, #ff5f6d, #d92b4b);
-    border-color: transparent; font-size: 18px; padding: 22px;
-  }
-  button:disabled { opacity: 0.4; }
-
-  .row { display: flex; gap: 10px; }
-  .row > button { flex: 1; }
-
-  #status { display: flex; flex-direction: column; gap: 7px; font-size: 14px; }
-  .line { display: flex; align-items: center; gap: 10px; }
-  #rates { font-size: 12px; font-variant-numeric: tabular-nums; }
-  #diag { border-color: #ff5f6d; background: #26141a; }
-  #diag b { display: block; margin-bottom: 4px; font-size: 15px; }
-  #diag-dump {
-    margin: 12px 0 0; padding: 10px; background: #0b0e14; border-radius: 9px;
-    font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
-    color: #8b95ad; white-space: pre-wrap; word-break: break-all;
-    max-height: 190px; overflow: auto; user-select: text; -webkit-user-select: text;
-  }
-  .dot { width: 9px; height: 9px; border-radius: 50%; background: #4b5468; flex: none; }
+  #topbar #player { color: #7fb7ff; font-weight: 600; }
+  #hz { margin-left: auto; font-variant-numeric: tabular-nums; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #4b5468; flex: none; }
   .dot.on  { background: #35d07f; box-shadow: 0 0 10px #35d07f88; }
   .dot.err { background: #ff5f6d; }
 
-  /* Live tilt readout — confirms the phone is actually streaming. */
-  #viz { flex: 1; position: relative; min-height: 140px; }
-  #viz canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-
-  #hz { font-variant-numeric: tabular-nums; }
-
-  /* Face buttons — big enough to hit without looking at the phone. */
-  .pad { display: flex; gap: 14px; align-items: stretch; }
-  .face {
-    flex: 1; font-size: 30px; font-weight: 800; padding: 26px 0;
-    border-radius: 22px; border: 1px solid #2b3448;
+  /* ── The remote ──────────────────────────────────────────────────────── */
+  #stage { flex: 1; display: flex; perspective: 900px; min-height: 0; }
+  #remote {
+    width: min(86vw, 330px); margin: auto; height: 100%; max-height: 780px;
+    display: flex; flex-direction: column; align-items: center;
+    padding: clamp(8px, 1.8vh, 20px) 24px clamp(6px, 1.4vh, 14px);
+    gap: clamp(3px, 1vh, 12px);
+    background: linear-gradient(175deg, #fdfdfe, #eef1f5 55%, #e2e7ed);
+    border: 1px solid #cfd6de; border-radius: 34px;
+    box-shadow: 0 26px 70px #000a, inset 0 2px 0 #fff, inset 0 -16px 34px #00000012;
+    transition: filter .45s ease;
+    transform-style: preserve-3d; will-change: transform;
   }
-  .face.a { flex: 1.7; background: linear-gradient(160deg, #2f6fe4, #1d47a0); border-color: transparent; }
-  .face.b { background: #1b2231; color: #8b95ad; }
-  .face:active { transform: scale(0.96); filter: brightness(1.15); }
+  #remote.asleep { filter: grayscale(.55) brightness(.72); }
+  .sp { flex: 1; }
 
-  /* Calibration banner — lights up while a step is in progress. */
-  #cal { transition: border-color .2s, background .2s; }
-  #cal.active { border-color: #35d07f; background: #14261d; }
-  #cal b { font-size: 17px; display: block; margin-bottom: 3px; }
+  button { font: inherit; color: inherit; border: none; background: none; padding: 0; }
+  button:active { }
+
+  /* Power */
+  #row-top { width: 100%; display: flex; flex: none; }
+  #power {
+    width: clamp(32px, 5vh, 40px); height: clamp(32px, 5vh, 40px); border-radius: 50%;
+    background: linear-gradient(180deg, #3a414b, #262c34);
+    color: #cfd6de; font-size: 16px;
+    box-shadow: inset 0 1px 0 #ffffff22, 0 2px 5px #0004;
+  }
+  #power:active { transform: translateY(1px); filter: brightness(1.25); }
+
+  /* D-pad: a solid cross. Sized by viewport height so short phones still fit
+     the whole face; segments are percentages of the pad, not pixels. */
+  #dpad { position: relative; width: clamp(84px, 15vh, 128px); height: clamp(84px, 15vh, 128px); flex: none; }
+  .dp {
+    position: absolute; width: 34.4%; height: 34.4%;
+    background: linear-gradient(180deg, #343b44, #23282f);
+    box-shadow: inset 0 1px 0 #ffffff1e, 0 2px 4px #0005;
+  }
+  .dp:active { filter: brightness(1.35); }
+  .dp.u { left: 32.8%; top: 0;    border-radius: 10px 10px 0 0; }
+  .dp.d { left: 32.8%; bottom: 0; border-radius: 0 0 10px 10px; }
+  .dp.l { left: 0;     top: 32.8%; border-radius: 10px 0 0 10px; }
+  .dp.r { right: 0;    top: 32.8%; border-radius: 0 10px 10px 0; }
+  .dp.c { left: 32.8%; top: 32.8%; border-radius: 0; box-shadow: none; pointer-events: none; }
+  .dp::after {
+    content: ''; position: absolute; left: 50%; top: 50%; width: 0; height: 0;
+    border: 7px solid transparent; opacity: .5;
+  }
+  .dp.u::after { border-bottom-color: #10141c; transform: translate(-50%, -80%); }
+  .dp.d::after { border-top-color: #10141c;    transform: translate(-50%, -20%); }
+  .dp.l::after { border-right-color: #10141c;  transform: translate(-80%, -50%); }
+  .dp.r::after { border-left-color: #10141c;   transform: translate(-20%, -50%); }
+  .dp.c::after { display: none; }
+
+  /* A — the hero button. */
+  #btn-a {
+    width: clamp(64px, 12vh, 96px); height: clamp(64px, 12vh, 96px);
+    border-radius: 50%; flex: none;
+    background: linear-gradient(180deg, #ffffff, #eef2f6);
+    border: 1px solid #c6cfd9;
+    box-shadow: 0 4px 10px #0003, inset 0 2px 0 #fff, inset 0 -6px 12px #a9b6c322;
+    color: #55708e; font-size: clamp(26px, 4.8vh, 38px); font-weight: 700;
+    transition: transform .06s ease;
+  }
+  #btn-a:active {
+    transform: scale(.94);
+    box-shadow: 0 1px 3px #0003, inset 0 3px 9px #8fa1b455;
+  }
+
+  /* B — the underside trigger, peeking in. */
+  #btn-b {
+    width: 62%; height: clamp(38px, 6vh, 46px);
+    border-radius: 14px 14px 22px 22px; flex: none;
+    background: linear-gradient(180deg, #4a525c, #31383f);
+    box-shadow: inset 0 1px 0 #ffffff24, 0 3px 7px #0005;
+    color: #e8ecf4; font-size: 22px; font-weight: 700;
+  }
+  #btn-b:active { transform: translateY(2px); filter: brightness(1.2); }
+
+  /* − ⌂ + */
+  #row-mid { display: flex; align-items: center; gap: 22px; flex: none; }
+  .pill {
+    width: clamp(34px, 5.4vh, 42px); height: clamp(34px, 5.4vh, 42px); border-radius: 50%;
+    background: linear-gradient(180deg, #f2f5f8, #dde3ea);
+    border: 1px solid #c6cfd9; box-shadow: 0 2px 4px #0002, inset 0 1px 0 #fff;
+    color: #5a6c80; font-size: 22px; font-weight: 700;
+  }
+  #btn-home { width: clamp(40px, 6.4vh, 50px); height: clamp(40px, 6.4vh, 50px); font-size: 21px; }
+  .pill:active { transform: scale(.92); box-shadow: 0 1px 2px #0002, inset 0 2px 6px #8fa1b444; }
+  .pill small { display: block; font-size: 8px; font-weight: 600; letter-spacing: .04em;
+                color: #93a3b4; margin-top: -3px; }
+
+  /* Speaker grille — pulses when the remote "speaks". */
+  #speaker { display: grid; grid-template-columns: repeat(5, 7px);
+             gap: clamp(5px, 1vh, 8px) 8px; flex: none; }
+  #speaker i {
+    width: 7px; height: 7px; border-radius: 50%; background: #c3ccd5;
+    box-shadow: inset 0 1px 1px #0002; transition: background .12s, box-shadow .12s;
+  }
+  #speaker.talk i { background: #6fb2ff; box-shadow: 0 0 8px #6fb2ff88; }
+
+  /* 1 / 2 */
+  #ones { display: flex; flex-direction: column; gap: clamp(6px, 1.2vh, 12px);
+          align-items: center; flex: none; }
+  .num {
+    width: clamp(34px, 5.8vh, 46px); height: clamp(34px, 5.8vh, 46px); border-radius: 50%;
+    background: linear-gradient(180deg, #f2f5f8, #dde3ea);
+    border: 1px solid #c6cfd9; box-shadow: 0 2px 4px #0002, inset 0 1px 0 #fff;
+    color: #5a6c80; font-size: 19px; font-weight: 700;
+  }
+  .num:active { transform: scale(.92); box-shadow: inset 0 2px 6px #8fa1b444; }
+
+  /* Player LEDs. */
+  #brand { font-size: 15px; font-weight: 700; color: #aab7c4; letter-spacing: .01em; flex: none; }
+  #leds { display: flex; gap: 14px; flex: none; padding-bottom: 2px; }
+  #leds i {
+    width: 13px; height: 8px; border-radius: 2.5px; background: #c3ccd5;
+    box-shadow: inset 0 1px 1px #0003;
+  }
+  #leds i.on { background: #45c1ff; box-shadow: 0 0 9px #45c1ffcc; }
+  #leds.seek i { animation: led-seek 1.2s infinite; }
+  #leds.seek i:nth-child(2) { animation-delay: .15s; }
+  #leds.seek i:nth-child(3) { animation-delay: .3s; }
+  #leds.seek i:nth-child(4) { animation-delay: .45s; }
+  @keyframes led-seek {
+    0%, 60%, 100% { background: #c3ccd5; box-shadow: inset 0 1px 1px #0003; }
+    20% { background: #45c1ff; box-shadow: 0 0 9px #45c1ffcc; }
+  }
+
+  #hint {
+    text-align: center; font-size: 11px; color: #6b7890; flex: none; letter-spacing: .01em;
+  }
+  /* Short phones: every pixel goes to the buttons. */
+  @media (max-height: 700px) {
+    #hint, #brand { display: none; }
+  }
+
+  /* ── Wake gate ───────────────────────────────────────────────────────── */
+  #gate {
+    position: fixed; inset: 0; z-index: 20; display: grid; place-items: center;
+    background: #10141cd8; backdrop-filter: blur(4px); padding: 24px;
+  }
+  #gate.hide { display: none; }
+  #gate .card {
+    background: #161c29; border: 1px solid #262f42; border-radius: 20px;
+    padding: 26px 22px; max-width: 360px; text-align: center;
+  }
+  #gate h1 { margin: 0 0 8px; font-size: 20px; }
+  #gate p { color: #8b95ad; font-size: 14px; margin: 0 0 20px; }
+  #enable {
+    width: 100%; padding: 18px; border-radius: 14px; font-size: 17px; font-weight: 700;
+    background: linear-gradient(160deg, #3c8cf0, #2361c9); color: #fff;
+    box-shadow: 0 6px 18px #2361c966;
+  }
+  #enable:active { transform: scale(.98); }
+  #enable:disabled { opacity: .4; }
+
+  /* ── Status sheet (button 2) ─────────────────────────────────────────── */
+  #sheet {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 15;
+    background: #141926f5; border-top: 1px solid #262f42;
+    border-radius: 18px 18px 0 0; padding: 16px 18px max(16px, env(safe-area-inset-bottom));
+    transform: translateY(105%); transition: transform .28s cubic-bezier(.3,.9,.3,1);
+    max-height: 72%; overflow: auto;
+  }
+  #sheet.open { transform: translateY(0); }
+  #sheet h2 { margin: 0 0 8px; font-size: 15px; }
+  .muted { color: #8b95ad; font-size: 13px; }
+  #rates { font-size: 12px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  #diag { margin-top: 12px; border: 1px solid #472531; background: #26141a;
+          border-radius: 12px; padding: 12px; }
+  #diag b { display: block; margin-bottom: 4px; font-size: 14px; }
+  #diag-dump {
+    margin: 10px 0 0; padding: 10px; background: #0b0e14; border-radius: 9px;
+    font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: #8b95ad; white-space: pre-wrap; word-break: break-all;
+    max-height: 170px; overflow: auto; user-select: text; -webkit-user-select: text;
+  }
   .hide { display: none !important; }
-  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; text-align: center; }
-  .grid b { display: block; font-variant-numeric: tabular-nums; font-size: 18px; }
-  .grid span { font-size: 11px; color: #8b95ad; text-transform: uppercase; letter-spacing: .06em; }
 </style>
 </head>
 <body>
 <div id="app">
-  <h1>🕹 Remote <span>/ OpenWii</span></h1>
+  <div id="topbar">
+    <span class="dot" id="dot-net"></span><span id="net">connecting…</span>
+    <span id="player" class="hide">P1</span>
+    <span id="hz">0 Hz</span>
+  </div>
 
-  <div class="card" id="status">
-    <div class="line">
-      <span class="dot" id="dot-net"></span><span id="net">connecting…</span>
-      <span style="flex:1"></span>
-      <span class="muted hide" id="player">Player 1</span>
-      <span class="muted" id="hz">0 Hz</span>
+  <div id="stage">
+    <div id="remote" class="asleep">
+      <div id="row-top"><button id="power" aria-label="power">⏻</button></div>
+
+      <div id="dpad">
+        <button class="dp u" aria-label="up"></button>
+        <button class="dp l" aria-label="left"></button>
+        <span class="dp c"></span>
+        <button class="dp r" aria-label="right"></button>
+        <button class="dp d" aria-label="down"></button>
+      </div>
+
+      <div class="sp"></div>
+      <button id="btn-a">A</button>
+      <div class="sp"></div>
+      <button id="btn-b">B</button>
+      <div class="sp"></div>
+
+      <div id="row-mid">
+        <button class="pill" id="btn-minus">−</button>
+        <button class="pill" id="btn-home">⌂</button>
+        <button class="pill" id="btn-plus">+</button>
+      </div>
+
+      <div class="sp"></div>
+      <div id="speaker">
+        <i></i><i></i><i></i><i></i><i></i>
+        <i></i><i></i><i></i><i></i><i></i>
+        <i></i><i></i><i></i><i></i><i></i>
+        <i></i><i></i><i></i><i></i><i></i>
+      </div>
+      <div class="sp"></div>
+
+      <div id="ones">
+        <button class="num" id="btn-1">1</button>
+        <button class="num" id="btn-2">2</button>
+      </div>
+
+      <div class="sp"></div>
+      <div id="brand">OpenWii</div>
+      <div id="leds" class="seek"><i></i><i></i><i></i><i></i></div>
     </div>
-    <div class="muted" id="rates">sensor 0 Hz · sent 0 Hz · offline</div>
   </div>
 
-  <div class="card hide" id="diag">
-    <b id="diag-title">⚠️ No sensor data</b>
-    <div class="muted" id="diag-body"></div>
-    <pre id="diag-dump"></pre>
-  </div>
+  <div id="hint"><b>A</b> select · <b>B</b> back · <b>⌂</b> menu · <b>−/+</b> speed · <b>1</b> re-centre · <b>2</b> status</div>
 
   <div id="gate">
-    <button class="primary" id="enable">Enable motion sensors</button>
-    <p class="muted" style="text-align:center">
-      Grant access, then hold the phone however feels natural and point it at the screen.
-    </p>
+    <div class="card">
+      <h1>🕹 Wake the remote</h1>
+      <p>Grant motion access, then hold the phone however feels natural and point it at the screen.</p>
+      <button id="enable">Enable motion sensors</button>
+    </div>
   </div>
 
-  <div id="live" class="hide" style="display:flex; flex-direction:column; gap:18px; flex:1;">
-    <div class="card" id="cal">
-      <b id="cal-title">⚔️ Ready</b>
-      <div class="muted" id="cal-body">Swing to slice.</div>
+  <div id="sheet">
+    <h2>Status</h2>
+    <div class="muted" id="rates">sensor 0 Hz · sent 0 Hz · offline</div>
+    <div id="diag" class="hide">
+      <b id="diag-title">⚠️ No sensor data</b>
+      <div class="muted" id="diag-body"></div>
+      <pre id="diag-dump"></pre>
     </div>
-
-    <div class="card grid">
-      <div><b id="v-yaw">0</b><span>yaw</span></div>
-      <div><b id="v-pitch">0</b><span>pitch</span></div>
-      <div><b id="v-roll">0</b><span>roll</span></div>
-    </div>
-
-    <div id="viz" class="card" style="padding:0; overflow:hidden;"><canvas id="c"></canvas></div>
-
-    <!-- A and B are the remote's real buttons: everything on screen is
-         reachable with them, so the PC keyboard is never required. -->
-    <div class="pad">
-      <button id="btn-b" class="face b">B</button>
-      <button id="btn-a" class="face a">A</button>
-    </div>
-
-    <div class="row">
-      <button id="recentre">Re-center</button>
-    </div>
-    <p class="muted" style="text-align:center; margin:0">
-      <strong>A</strong> selects · <strong>B</strong> goes back.
-      Re-center puts the cursor back in the middle.
-    </p>
   </div>
 </div>
 
