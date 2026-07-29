@@ -102,288 +102,6 @@ const CHANNEL_ART = {
   kart: ['#f4785f', '#c93a30'],
 };
 
-/**
- * Custom channel artwork, drawn in code — bold, simple shapes in the flat
- * vector style of the real channel tiles. Each painter gets the tile context
- * with the art already clipped and the background gradient down; it draws
- * around (w/2, h*0.42) at a scale derived from h.
- */
-const ART_PAINTERS = {
-  'fruit-ninja': (g, w, h) => {
-    const cx = w / 2;
-    const cy = h * 0.44;
-    const R = h * 0.30;
-    g.save();
-    g.translate(cx, cy);
-    g.rotate(-0.5);
-    softShadow(g);
-    // A watermelon half: rind, pith, flesh, seeds.
-    const wedge = (r, colour) => {
-      g.beginPath();
-      g.arc(0, 0, r, Math.PI, 0);
-      g.closePath();
-      g.fillStyle = colour;
-      g.fill();
-    };
-    wedge(R, '#2c7a33');
-    g.shadowColor = 'transparent';
-    wedge(R * 0.93, '#8ed06b');
-    wedge(R * 0.86, '#f7f3e0');
-    wedge(R * 0.8, '#ef4444');
-    g.fillStyle = '#26180f';
-    for (const [sx, sy, a] of [[-0.45, -0.32, 0.5], [0, -0.5, 0], [0.45, -0.32, -0.5]]) {
-      g.save();
-      g.translate(R * sx, R * sy * 0.55);
-      g.rotate(a);
-      g.beginPath();
-      g.ellipse(0, 0, R * 0.045, R * 0.08, 0, 0, Math.PI * 2);
-      g.fill();
-      g.restore();
-    }
-    g.restore();
-    // The blade swoosh that just cut it.
-    g.save();
-    g.strokeStyle = 'rgba(255,255,255,0.95)';
-    g.lineCap = 'round';
-    g.lineWidth = h * 0.028;
-    g.beginPath();
-    g.moveTo(cx - R * 1.5, cy + R * 0.7);
-    g.quadraticCurveTo(cx, cy - R * 1.15, cx + R * 1.55, cy - R * 0.55);
-    g.stroke();
-    g.restore();
-  },
-
-  golf: (g, w, h) => {
-    const cx = w / 2;
-    const base = h * 0.62;
-    // Rolling green.
-    softShadow(g);
-    g.fillStyle = '#67b34e';
-    g.beginPath();
-    g.ellipse(cx, base, w * 0.34, h * 0.15, 0, 0, Math.PI * 2);
-    g.fill();
-    g.shadowColor = 'transparent';
-    g.fillStyle = '#7cc95d';
-    g.beginPath();
-    g.ellipse(cx - w * 0.05, base - h * 0.02, w * 0.3, h * 0.12, 0, 0, Math.PI * 2);
-    g.fill();
-    // The hole, the pin, the flag.
-    const hx = cx + w * 0.1;
-    const hy = base - h * 0.015;
-    g.fillStyle = '#1d3a24';
-    g.beginPath();
-    g.ellipse(hx, hy, w * 0.045, h * 0.018, 0, 0, Math.PI * 2);
-    g.fill();
-    g.strokeStyle = '#f4f6f8';
-    g.lineWidth = h * 0.016;
-    g.lineCap = 'round';
-    g.beginPath();
-    g.moveTo(hx, hy);
-    g.lineTo(hx, hy - h * 0.34);
-    g.stroke();
-    g.fillStyle = '#e23b3b';
-    g.beginPath();
-    g.moveTo(hx, hy - h * 0.34);
-    g.lineTo(hx - w * 0.13, hy - h * 0.285);
-    g.lineTo(hx, hy - h * 0.23);
-    g.closePath();
-    g.fill();
-    // The ball, sitting up on the green.
-    softShadow(g, 0.2);
-    g.fillStyle = '#ffffff';
-    g.beginPath();
-    g.arc(cx - w * 0.14, hy - h * 0.012, h * 0.036, 0, Math.PI * 2);
-    g.fill();
-    g.shadowColor = 'transparent';
-  },
-
-  'island-flyover': (g, w, h) => {
-    const cx = w / 2;
-    const sea = h * 0.62;
-    // The island: sand rim, green body, snow-capped peak.
-    softShadow(g);
-    g.fillStyle = '#e8d9a8';
-    g.beginPath();
-    g.ellipse(cx, sea, w * 0.3, h * 0.1, 0, 0, Math.PI * 2);
-    g.fill();
-    g.shadowColor = 'transparent';
-    g.fillStyle = '#4d9e53';
-    g.beginPath();
-    g.ellipse(cx, sea - h * 0.02, w * 0.25, h * 0.085, 0, 0, Math.PI * 2);
-    g.fill();
-    g.fillStyle = '#5f7c6b';
-    g.beginPath();
-    g.moveTo(cx - w * 0.09, sea - h * 0.03);
-    g.lineTo(cx, sea - h * 0.21);
-    g.lineTo(cx + w * 0.09, sea - h * 0.03);
-    g.closePath();
-    g.fill();
-    g.fillStyle = '#f4f7f8';
-    g.beginPath();
-    g.moveTo(cx - w * 0.032, sea - h * 0.145);
-    g.lineTo(cx, sea - h * 0.21);
-    g.lineTo(cx + w * 0.032, sea - h * 0.145);
-    g.closePath();
-    g.fill();
-    // The plane, banking overhead, with its wake.
-    g.save();
-    g.translate(cx + w * 0.16, h * 0.2);
-    g.rotate(0.12);
-    softShadow(g, 0.25);
-    g.fillStyle = '#e23b3b';
-    g.fillRect(-w * 0.095, -h * 0.012, w * 0.19, h * 0.024);
-    g.fillStyle = '#f4f6f9';
-    g.beginPath();
-    g.ellipse(0, 0, w * 0.06, h * 0.021, 0, 0, Math.PI * 2);
-    g.fill();
-    g.restore();
-    g.strokeStyle = 'rgba(255,255,255,0.8)';
-    g.lineWidth = h * 0.014;
-    g.lineCap = 'round';
-    g.setLineDash([h * 0.02, h * 0.045]);
-    g.beginPath();
-    g.moveTo(cx - w * 0.28, h * 0.33);
-    g.quadraticCurveTo(cx - w * 0.05, h * 0.28, cx + w * 0.08, h * 0.2);
-    g.stroke();
-    g.setLineDash([]);
-  },
-
-  kart: (g, w, h) => {
-    const base = h * 0.58;
-    // Track band with the chequered start line.
-    g.fillStyle = '#4a4a52';
-    g.fillRect(0, base - h * 0.1, w, h * 0.26);
-    const sq = h * 0.033;
-    for (let r = 0; r < 2; r += 1) {
-      for (let x = 0; x < w; x += sq * 2) {
-        g.fillStyle = (r + x / (sq * 2)) % 2 < 1 ? '#f2f2f2' : '#1c1c22';
-        g.fillRect(x + (r % 2) * sq, base - h * 0.1 + r * sq, sq, sq);
-      }
-    }
-    // The kart: red body, dark wheels, a helmeted driver.
-    const cx = w / 2;
-    const cy = base + h * 0.045;
-    g.save();
-    g.translate(cx, cy);
-    softShadow(g);
-    g.fillStyle = '#d92b1f';
-    roundRect(g, -w * 0.14, -h * 0.075, w * 0.28, h * 0.085, h * 0.03);
-    g.fill();
-    g.fillStyle = '#b81f15';
-    roundRect(g, w * 0.1, -h * 0.055, w * 0.075, h * 0.05, h * 0.02);
-    g.fill();
-    g.shadowColor = 'transparent';
-    g.fillStyle = '#f4f6f8';
-    g.beginPath();
-    g.arc(-w * 0.02, -h * 0.1, h * 0.045, 0, Math.PI * 2);
-    g.fill();
-    g.fillStyle = '#22262e';
-    for (const wx of [-w * 0.095, w * 0.095]) {
-      g.beginPath();
-      g.arc(wx, h * 0.02, h * 0.05, 0, Math.PI * 2);
-      g.fill();
-      g.fillStyle = '#22262e';
-    }
-    g.restore();
-    // Speed lines.
-    g.strokeStyle = 'rgba(255,255,255,0.75)';
-    g.lineWidth = h * 0.016;
-    g.lineCap = 'round';
-    for (const [y0, x0, x1] of [[cy - h * 0.06, 0.08, 0.2], [cy - h * 0.01, 0.05, 0.16]]) {
-      g.beginPath();
-      g.moveTo(cx - w * (0.14 + x1), y0);
-      g.lineTo(cx - w * (0.14 + x0), y0);
-      g.stroke();
-    }
-  },
-
-  swordplay: (g, w, h) => {
-    const cx = w / 2;
-    const cy = h * 0.42;
-    const blade = (angle) => {
-      g.save();
-      g.translate(cx, cy);
-      g.rotate(angle);
-      softShadow(g);
-      // Blade with a bright edge and a tapered tip.
-      const L = h * 0.34;
-      const W = h * 0.05;
-      const grad = g.createLinearGradient(-W, 0, W, 0);
-      grad.addColorStop(0, '#eef2f6');
-      grad.addColorStop(0.5, '#c9d3dd');
-      grad.addColorStop(1, '#9fabb9');
-      g.fillStyle = grad;
-      g.beginPath();
-      g.moveTo(-W / 2, L * 0.55);
-      g.lineTo(-W / 2, -L);
-      g.lineTo(0, -L - W * 1.4);
-      g.lineTo(W / 2, -L);
-      g.lineTo(W / 2, L * 0.55);
-      g.closePath();
-      g.fill();
-      g.shadowColor = 'transparent';
-      // Guard and grip.
-      g.fillStyle = '#caa53d';
-      roundRect(g, -W * 1.6, L * 0.55, W * 3.2, W * 0.75, W * 0.35);
-      g.fill();
-      g.fillStyle = '#3a2c52';
-      roundRect(g, -W * 0.55, L * 0.55 + W * 0.75, W * 1.1, L * 0.34, W * 0.5);
-      g.fill();
-      g.fillStyle = '#caa53d';
-      g.beginPath();
-      g.arc(0, L * 0.55 + W * 0.75 + L * 0.34 + W * 0.5, W * 0.62, 0, Math.PI * 2);
-      g.fill();
-      g.restore();
-    };
-    blade(-0.62);
-    blade(0.62);
-  },
-
-  'table-tennis': (g, w, h) => {
-    const cx = w / 2 - w * 0.04;
-    const cy = h * 0.46;
-    g.save();
-    g.translate(cx, cy);
-    g.rotate(-0.5);
-    softShadow(g);
-    // Handle first, then the blade over it.
-    g.fillStyle = '#d9a45c';
-    roundRect(g, -h * 0.045, h * 0.16, h * 0.09, h * 0.24, h * 0.045);
-    g.fill();
-    g.fillStyle = '#e23b3b';
-    g.beginPath();
-    g.ellipse(0, 0, h * 0.21, h * 0.24, 0, 0, Math.PI * 2);
-    g.fill();
-    g.shadowColor = 'transparent';
-    g.strokeStyle = '#b81f15';
-    g.lineWidth = h * 0.02;
-    g.beginPath();
-    g.ellipse(0, 0, h * 0.185, h * 0.215, 0, 0, Math.PI * 2);
-    g.stroke();
-    g.restore();
-    // The ball, mid-flight with a bounce arc.
-    softShadow(g, 0.2);
-    g.fillStyle = '#ffffff';
-    g.beginPath();
-    g.arc(cx + w * 0.2, cy - h * 0.2, h * 0.05, 0, Math.PI * 2);
-    g.fill();
-    g.shadowColor = 'transparent';
-    g.strokeStyle = 'rgba(255,255,255,0.7)';
-    g.lineWidth = h * 0.013;
-    g.setLineDash([h * 0.015, h * 0.035]);
-    g.beginPath();
-    g.arc(cx + w * 0.06, cy + h * 0.09, h * 0.34, -1.85, -0.55);
-    g.stroke();
-    g.setLineDash([]);
-  },
-};
-
-function softShadow(g, strength = 0.3) {
-  g.shadowColor = `rgba(20, 30, 45, ${strength})`;
-  g.shadowBlur = 16;
-  g.shadowOffsetY = 6;
-}
-
 function drawTileFace(g, w, h, game) {
   const pad = 10;
   g.clearRect(0, 0, w, h);
@@ -416,22 +134,15 @@ function drawTileFace(g, w, h, game) {
   g.fillStyle = grad;
   g.fillRect(0, 0, w, h);
 
-  const paint = ART_PAINTERS[game.slug];
-  if (paint) {
-    paint(g, w, h);
-  } else {
-    // Unknown channel: fall back to its emoji, big and centred.
-    g.font = `${Math.round(h * 0.42)}px -apple-system, "Apple Color Emoji", system-ui, sans-serif`;
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.shadowColor = 'rgba(0,0,0,0.25)';
-    g.shadowBlur = 18;
-    g.shadowOffsetY = 6;
-    g.fillText(game.emoji || '🎮', w / 2, h * 0.42);
-    g.shadowColor = 'transparent';
-  }
-
+  g.font = `${Math.round(h * 0.42)}px -apple-system, "Apple Color Emoji", system-ui, sans-serif`;
   g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.shadowColor = 'rgba(0,0,0,0.25)';
+  g.shadowBlur = 18;
+  g.shadowOffsetY = 6;
+  g.fillText(game.emoji || '🎮', w / 2, h * 0.42);
+  g.shadowColor = 'transparent';
+
   g.fillStyle = '#ffffff';
   g.font = `700 ${Math.round(h * 0.115)}px -apple-system, system-ui, sans-serif`;
   g.textBaseline = 'alphabetic';
@@ -747,78 +458,17 @@ function drawArrow(a) {
 }
 
 // ── Hand cursor ────────────────────────────────────────────────────────────
-/**
- * The Wii pointer, matched to the original: a chunky white fist with the
- * index finger up, thick slate outline, soft drop shadow, and the player
- * number written large in blue across the palm.
- */
-function handTexture(playerColour, playerNum = 1) {
-  return makeTexture(1.3, 1.5, (g, w, h) => {
-    g.clearRect(0, 0, w, h);
-    g.translate(w * 0.5, h * 0.48);
-    const s = w * 0.0062;
-    g.scale(s, s);
-    g.rotate(-0.12);
-    g.lineJoin = 'round';
-    g.lineCap = 'round';
-
-    const glove = () => {
-      g.beginPath();
-      // Index finger, pointing up from the left of the fist.
-      g.moveTo(-28, -8);
-      g.lineTo(-28, -46);
-      g.quadraticCurveTo(-28, -58, -19, -58);
-      g.quadraticCurveTo(-10, -58, -10, -46);
-      g.lineTo(-10, -22);
-      // Three folded knuckles rolling over the top of the fist.
-      g.quadraticCurveTo(-4, -27, 4, -24);
-      g.quadraticCurveTo(12, -30, 20, -22);
-      g.quadraticCurveTo(30, -24, 33, -12);
-      g.quadraticCurveTo(40, -8, 38, 4);
-      // Round fist edge down to the wrist.
-      g.quadraticCurveTo(38, 20, 28, 29);
-      g.quadraticCurveTo(20, 37, 6, 39);
-      g.lineTo(-8, 39);
-      g.quadraticCurveTo(-27, 36, -31, 18);
-      g.quadraticCurveTo(-34, 3, -28, -8);
-      g.closePath();
-    };
-
-    // Drop shadow first, then the glove.
-    g.save();
-    g.translate(4, 7);
-    glove();
-    g.fillStyle = 'rgba(30, 48, 82, 0.25)';
-    g.fill();
-    g.restore();
-
-    glove();
-    g.fillStyle = '#ffffff';
-    g.fill();
-    g.strokeStyle = '#3c4d61';
-    g.lineWidth = 10;
-    g.stroke();
-
-    // Knuckle creases along the top of the fist.
-    g.strokeStyle = 'rgba(60, 77, 97, 0.5)';
-    g.lineWidth = 4.5;
-    g.beginPath(); g.moveTo(2, -22); g.quadraticCurveTo(6, -15, 4, -8); g.stroke();
-    g.beginPath(); g.moveTo(18, -19); g.quadraticCurveTo(22, -12, 20, -5); g.stroke();
-
-    // The player number, big and blue across the palm.
-    g.fillStyle = playerColour;
-    g.strokeStyle = 'rgba(255,255,255,0.9)';
-    g.lineWidth = 3;
-    g.font = '800 40px -apple-system, "Arial Rounded MT Bold", system-ui, sans-serif';
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.fillText(String(playerNum), 4, 12);
-  });
-}
-
+// The Wii pointer, from art: a transparent PNG of the original-style glove
+// with the player number baked in (public/assets/hand-p1.png).
+const handTex = new THREE.TextureLoader().load('/assets/hand-p1.png');
+handTex.colorSpace = THREE.SRGBColorSpace;
+handTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+const HAND_SIZE = 2.0;                 // square sprite, world units at scale 1
+// Where the fingertip sits inside the image (fractions from the top-left).
+const HAND_TIP = { x: 0.32, y: 0.09 };
 const hand = new THREE.Mesh(
-  new THREE.PlaneGeometry(1.3, 1.5),
-  new THREE.MeshBasicMaterial({ map: handTexture('#3c8cf0').texture, transparent: true, depthTest: false }),
+  new THREE.PlaneGeometry(HAND_SIZE, HAND_SIZE),
+  new THREE.MeshBasicMaterial({ map: handTex, transparent: true, depthTest: false }),
 );
 hand.renderOrder = 999;
 scene.add(hand);
@@ -1013,10 +663,14 @@ function step(now, dt) {
   // The hotspot is the fingertip, so the sprite hangs down-right of the aim
   // point. Both sprite and offset scale with the layout, or the cursor looks
   // enormous on a small window.
-  // The original's cursor is big — nearly half a tile tall.
-  const hk = L.scale * 1.28;
+  // Hang the sprite so the PNG's fingertip sits exactly on the aim point.
+  const hk = L.scale;
   hand.scale.setScalar(hk);
-  hand.position.set(p.x + 0.21 * hk, p.y - 0.48 * hk, 3);
+  hand.position.set(
+    p.x + (0.5 - HAND_TIP.x) * HAND_SIZE * hk,
+    p.y - (0.5 - HAND_TIP.y) * HAND_SIZE * hk,
+    3,
+  );
   hand.visible = !launching;
 
   if (!launching) setHover(hitTest(p.x, p.y));
