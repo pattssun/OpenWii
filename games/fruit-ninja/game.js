@@ -877,6 +877,30 @@ function toScreen(x, y) {
   };
 }
 
+/**
+ * The link pill names every connected phone and whether it's actually
+ * streaming motion — "P2 no motion" is the difference between a paired phone
+ * and a playing one, and it's exactly the state that otherwise looks like
+ * "multiplayer is broken" (a phone that never tapped Enable motion sensors).
+ */
+function syncLinkLabel() {
+  const occupied = (link.slots || []).filter((s) => s.occupied);
+  if (occupied.length === 0) { $('link-t').textContent = 'no remote connected'; return; }
+  if (occupied.length === 1) {
+    const s = occupied[0];
+    const inp = inputs.get(s.slot);
+    const streaming = inp && performance.now() - inp.lastSampleAt < 2000;
+    $('link-t').textContent = streaming ? 'remote connected' : 'remote paired · no motion yet';
+    return;
+  }
+  $('link-t').textContent = occupied.map((s) => {
+    const inp = inputs.get(s.slot);
+    const streaming = inp && performance.now() - inp.lastSampleAt < 2000;
+    return `P${s.slot + 1}${streaming ? '' : ' (no motion)'}`;
+  }).join(' · ');
+}
+setInterval(syncLinkLabel, 1000);
+
 /** Re-centre one phone's blade; names the player once there's more than one. */
 function recentreSlot(slot) {
   inputFor(slot).pointer.recentre();
@@ -911,9 +935,7 @@ const link = new GameLink({
   onPresence: (p) => {
     const on = p.controller > 0;
     $('dot').classList.toggle('on', on);
-    $('link-t').textContent = on
-      ? (p.controller > 1 ? `${p.controller} remotes connected` : 'remote connected')
-      : 'no remote connected';
+    syncLinkLabel();
     // A departed phone's blade shouldn't hang in the air forever. logic.js's
     // staleness cutoff already stops it from cutting fruit, but the visible
     // cursor should vanish right away rather than freeze at its last spot.

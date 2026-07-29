@@ -458,48 +458,117 @@ handTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
 const HAND_SIZE = 1.6;                 // square sprite, world units at scale 1
 // Where the fingertip sits inside the image (fractions from the top-left).
 const HAND_TIP = { x: 0.32, y: 0.09 };
-const hand = new THREE.Mesh(
-  new THREE.PlaneGeometry(HAND_SIZE, HAND_SIZE),
-  new THREE.MeshBasicMaterial({ map: handTex, transparent: true, depthTest: false }),
-);
-hand.renderOrder = 999;
-scene.add(hand);
+
+// One hand per connected phone (max 4 — the server's MAX_PLAYERS). All hands
+// share the P1 artwork; players 2–4 get a coloured number badge drawn over
+// the baked-in "1" so each cursor is unmistakably somebody's.
+const PLAYER_COLOURS = ['#3c8cf0', '#ff5f6d', '#7ed957', '#ffd166'];
+
+function badgeTexture(slot) {
+  return makeTexture(0.5, 0.5, (g, w, h) => {
+    g.clearRect(0, 0, w, h);
+    g.fillStyle = PLAYER_COLOURS[slot % PLAYER_COLOURS.length];
+    g.strokeStyle = '#243b63';
+    g.lineWidth = w * 0.07;
+    g.beginPath();
+    g.arc(w / 2, h / 2, w * 0.42, 0, Math.PI * 2);
+    g.fill();
+    g.stroke();
+    g.fillStyle = '#fff';
+    g.font = `800 ${Math.round(h * 0.52)}px -apple-system, system-ui, sans-serif`;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(String(slot + 1), w / 2, h * 0.54);
+  }).texture;
+}
+
+function makeHand(slot) {
+  const group = new THREE.Group();
+  const sprite = new THREE.Mesh(
+    new THREE.PlaneGeometry(HAND_SIZE, HAND_SIZE),
+    new THREE.MeshBasicMaterial({ map: handTex, transparent: true, depthTest: false }),
+  );
+  sprite.renderOrder = 999;
+  group.add(sprite);
+  if (slot > 0) {
+    // Cover the artwork's baked "1" (sits around 53%, 55% of the image).
+    const badge = new THREE.Mesh(
+      new THREE.PlaneGeometry(HAND_SIZE * 0.34, HAND_SIZE * 0.34),
+      new THREE.MeshBasicMaterial({ map: badgeTexture(slot), transparent: true, depthTest: false }),
+    );
+    badge.renderOrder = 1000;
+    badge.position.set((0.53 - 0.5) * HAND_SIZE, (0.5 - 0.55) * HAND_SIZE, 0.01);
+    group.add(badge);
+  }
+  group.visible = false;
+  scene.add(group);
+  return group;
+}
 
 // ── State ──────────────────────────────────────────────────────────────────
 const audio = new AudioEngine();
-const pointer = new Pointer({});
-// Pointer speed is a preference, remembered across pages and restarts.
-pointer.sensitivity = loadSensitivity() ?? 1;
-let lastSample = null;
-let lastSampleAt = 0;
-let hovered = null;         // tile | arrow | 'wii' | null
+
+/**
+ * Per-phone input state, keyed by the server-assigned slot. Each phone gets
+ * its own Pointer (gyro conventions are learned per device) and its own hand.
+ * Slot 0 doubles as the mouse/keyboard desk-testing fallback, exactly as the
+ * old single-pointer menu behaved.
+ */
+const inputs = new Map();   // slot → { pointer, lastSampleAt, hand, hover, lastHover }
+
+function inputFor(slot) {
+  let inp = inputs.get(slot);
+  if (!inp) {
+    const p = new Pointer({});
+    // Pointer speed is a preference, remembered across pages and restarts —
+    // but there's one saved value, and slot 0 is the phone that's always
+    // there. Extra players tune for the session.
+    p.sensitivity = (slot === 0 ? loadSensitivity() : null) ?? 1;
+    p.setViewport(window.innerWidth, window.innerHeight);
+    inp = { pointer: p, lastSampleAt: 0, hand: makeHand(slot), hover: null, lastHover: null };
+    inputs.set(slot, inp);
+  }
+  return inp;
+}
+inputFor(0);
+
 let launching = null;       // { tile, t } during zoom-to-fill
 
 // No calibration flow. Rate-based aiming is grip-agnostic and unit/sign
-// auto-gaining, so the pointer is live from the first packet: pair and play.
+// auto-gaining, so each pointer is live from its phone's first packet.
 
 const link = new GameLink({
-  onOrientation: (sample) => {
+  onOrientation: (sample, slot) => {
     const now = performance.now();
-    const dt = lastSampleAt ? clamp((now - lastSampleAt) / 1000, 1 / 240, 0.1) : 1 / 60;
-    lastSampleAt = now;
-    lastSample = sample;
-    pointer.update(sample, dt, now);
+    const inp = inputFor(slot);
+    const dt = inp.lastSampleAt ? clamp((now - inp.lastSampleAt) / 1000, 1 / 240, 0.1) : 1 / 60;
+    inp.lastSampleAt = now;
+    inp.pointer.update(sample, dt, now);
   },
-  onCommand: (cmd) => {
-    if (cmd.type === 'button' && cmd.button === 'A') pressA();
+  onCommand: (cmd, slot) => {
+    if (cmd.type === 'button' && cmd.button === 'A') pressA(slot);
     else if (cmd.type === 'button' && cmd.button === 'B') pressB();
-    else if (cmd.type === 'calibrate' || cmd.type === 'recentre') quickRecentre();
+    else if (cmd.type === 'calibrate' || cmd.type === 'recentre') quickRecentre(slot);
     else if (cmd.type === 'speed') {
-      pointer.sensitivity = clamp(pointer.sensitivity * (cmd.factor || 1), 0.2, 6);
-      saveSensitivity(pointer.sensitivity);
-      showSpeed();
+      const p = inputFor(slot).pointer;
+      p.sensitivity = clamp(p.sensitivity * (cmd.factor || 1), 0.2, 6);
+      if (slot === 0) saveSensitivity(p.sensitivity);
+      showSpeed(slot);
     }
   },
-  onPresence: ({ controller }) => {
-    const on = controller > 0;
+  onPresence: (pr) => {
+    const on = pr.controller > 0;
     $('dot').classList.toggle('on', on);
-    $('link-t').textContent = on ? 'remote connected' : 'no remote connected';
+    $('link-t').textContent = on
+      ? (pr.controller > 1 ? `${pr.controller} remotes connected` : 'remote connected')
+      : 'no remote connected';
+    // Hide the hand of any phone that left, immediately — not after its
+    // pointer times out.
+    for (const s of pr.slots || []) {
+      if (s.occupied) continue;
+      const inp = inputs.get(s.slot);
+      if (inp) { inp.pointer.live = false; inp.hand.visible = false; inp.hover = null; }
+    }
   },
 });
 
@@ -520,23 +589,27 @@ function ensureAudio() {
 
 /** Transient readout so speed changes are visible while adjusting. */
 let speedUntil = 0;
-function showSpeed() {
+function showSpeed(slot = 0) {
   speedUntil = performance.now() + 1600;
-  $('speed').textContent = `Pointer speed ${(pointer.sensitivity * 100).toFixed(0)}%`;
+  const p = inputFor(slot).pointer;
+  const who = link.controllers > 1 ? `P${slot + 1} pointer` : 'Pointer';
+  $('speed').textContent = `${who} speed ${(p.sensitivity * 100).toFixed(0)}%`;
   $('speed').classList.add('on');
 }
 
-function quickRecentre() {
+function quickRecentre(slot = 0) {
   ensureAudio();
-  pointer.recentre();
+  inputFor(slot).pointer.recentre();
   audio.play('select');
 }
 
 // ── Interaction ────────────────────────────────────────────────────────────
-function pressA() {
+/** A press acts on whatever THAT player's hand is over. */
+function pressA(slot = 0) {
   ensureAudio();
   if (launching) return;
 
+  const hovered = inputFor(slot).hover;
   if (hovered === 'wii' || hovered === 'qr') { audio.play('select'); return; }
   if (hovered && hovered.dir !== undefined) { turnPage(hovered.dir); return; }
   if (hovered && hovered.game) launch(hovered);
@@ -578,7 +651,7 @@ function resize() {
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
-  pointer.setViewport(w, h);
+  for (const inp of inputs.values()) inp.pointer.setViewport(w, h);
 
   const halfH = VIEW_H / 2;
   barMesh.position.set(0, -halfH + BAR_H / 2 + 0.18, 0.05);
@@ -620,10 +693,10 @@ function hitTest(wx, wy) {
   return null;
 }
 
-function setHover(next) {
-  if (next === hovered) return;
-  hovered = next;
-  if (next) audio.play('hover');
+/** True while any player's hand is over the given target. */
+function anyHover(target) {
+  for (const inp of inputs.values()) if (inp.hover === target) return true;
+  return false;
 }
 
 // ── Loop ───────────────────────────────────────────────────────────────────
@@ -646,31 +719,37 @@ function frame(now) {
 /** One frame's work, split out so it can be driven deterministically. */
 function step(now, dt) {
 
-  if (!pointer.live && mouse.active) pointer.setFromMouse(mouse.x, mouse.y);
-  if (pointer.live && now - pointer.lastSeen > 500) pointer.live = false;
+  // Every connected phone drives its own hand. Slot 0 also accepts the
+  // mouse when no phone owns it — the desk-testing fallback, unchanged.
+  for (const [slot, inp] of inputs) {
+    const ptr = inp.pointer;
+    if (!ptr.live && slot === 0 && mouse.active) ptr.setFromMouse(mouse.x, mouse.y);
+    if (ptr.live && now - ptr.lastSeen > 500) ptr.live = false;
 
-  // Per-frame prediction, not the last packet — see Pointer.sampleAt.
-  const aim = pointer.sampleAt(now);
-  const p = toWorld(aim.x, aim.y);
-  // The hotspot is the fingertip, so the sprite hangs down-right of the aim
-  // point. Both sprite and offset scale with the layout, or the cursor looks
-  // enormous on a small window.
-  // Hang the sprite so the PNG's fingertip sits exactly on the aim point.
-  const hk = L.scale;
-  hand.scale.setScalar(hk);
-  hand.position.set(
-    p.x + (0.5 - HAND_TIP.x) * HAND_SIZE * hk,
-    p.y - (0.5 - HAND_TIP.y) * HAND_SIZE * hk,
-    3,
-  );
-  hand.visible = !launching;
+    const active = ptr.live || (slot === 0 && mouse.active);
+    // Per-frame prediction, not the last packet — see Pointer.sampleAt.
+    const aim = ptr.sampleAt(now);
+    const p = toWorld(aim.x, aim.y);
+    // Hang the sprite so the PNG's fingertip sits exactly on the aim point.
+    // Both sprite and offset scale with the layout, or the cursor looks
+    // enormous on a small window.
+    const hk = L.scale;
+    inp.hand.scale.setScalar(hk);
+    inp.hand.position.set(
+      p.x + (0.5 - HAND_TIP.x) * HAND_SIZE * hk,
+      p.y - (0.5 - HAND_TIP.y) * HAND_SIZE * hk,
+      3 + slot * 0.01,          // stable stacking when hands overlap
+    );
+    inp.hand.visible = active && !launching;
 
-  if (!launching) setHover(hitTest(p.x, p.y));
-  else if (launching) setHover(null);
+    inp.hover = (active && !launching) ? hitTest(p.x, p.y) : null;
+    if (inp.hover && inp.hover !== inp.lastHover) audio.play('hover');
+    inp.lastHover = inp.hover;
+  }
 
-  // Idle wobble + hover response.
+  // Idle wobble + hover response — a tile lights up if ANY hand is on it.
   for (const t of tiles) {
-    const target = t === hovered ? 1 : 0;
+    const target = anyHover(t) ? 1 : 0;
     t.hover += (target - t.hover) * Math.min(1, dt * 12);
     const w = Math.sin(now / 1000 * 0.9 + t.phase);
     const w2 = Math.cos(now / 1000 * 0.7 + t.phase * 1.3);
@@ -682,7 +761,7 @@ function step(now, dt) {
   }
 
   for (const a of arrows) {
-    const target = a === hovered ? 1 : 0;
+    const target = anyHover(a) ? 1 : 0;
     const before = a.hover;
     a.hover += (target - a.hover) * Math.min(1, dt * 12);
     if (Math.abs(a.hover - before) > 0.01) drawArrow(a);
@@ -690,9 +769,9 @@ function step(now, dt) {
   }
 
   wiiButtonPulse += dt * 1.6;
-  const wiiTarget = hovered === 'wii' ? 1 : 0;
+  const wiiTarget = anyHover('wii') ? 1 : 0;
   wiiButtonHover += (wiiTarget - wiiButtonHover) * Math.min(1, dt * 12);
-  const qrTarget = hovered === 'qr' ? 1 : 0;
+  const qrTarget = anyHover('qr') ? 1 : 0;
   qrHover += (qrTarget - qrHover) * Math.min(1, dt * 12);
   barClock += dt;
   if (barClock > 0.2) { barClock = 0; drawBar(); }
@@ -741,8 +820,9 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
     e.preventDefault();
     const step = e.key === 'ArrowRight' ? 1.12 : 1 / 1.12;
-    pointer.sensitivity = clamp(pointer.sensitivity * step, 0.2, 6);
-    saveSensitivity(pointer.sensitivity);
+    const p0 = inputFor(0).pointer;
+    p0.sensitivity = clamp(p0.sensitivity * step, 0.2, 6);
+    saveSensitivity(p0.sensitivity);
     showSpeed();
   } else if (e.key.toLowerCase() === 'r') quickRecentre();
   else if (e.key.toLowerCase() === 'c') quickRecentre();
@@ -763,17 +843,24 @@ fetch('/api/pairing').then((r) => r.json()).then(({ qr }) => {
   qrImg.src = qr;
 }).catch(() => {});
 
+const hoverName = (h) => (h === 'wii' ? 'OpenWii button'
+  : h === 'qr' ? 'QR button'
+    : h && h.dir !== undefined ? 'arrow'
+      : h && h.game ? h.game.title : '—');
+
 setInterval(() => {
   if (!$('debug').classList.contains('on')) return;
+  const p0 = inputFor(0).pointer;
+  const perPlayer = [...inputs.entries()].map(([slot, inp]) =>
+    `P${slot + 1} ${inp.pointer.live ? '⚡' : '·'} ${hoverName(inp.hover)}`).join('  ');
   $('debug').textContent = [
     `fps         ${fps.toFixed(0)}`,
-    `pointer     ${pointer.display.x.toFixed(3)}, ${pointer.display.y.toFixed(3)}`,
-    `lead        ${(pointer.lead*1000).toFixed(0)}ms  vel ${Math.hypot(pointer.vel.x, pointer.vel.y).toFixed(2)}/s`,
-    `gyro map    ${pointer.describeMap()}`,
-    `rate        ${pointer.rateDps.yaw.toFixed(1)} / ${pointer.rateDps.pitch.toFixed(1)} deg/s`,
-    `deg/screen  ${(pointer.degPerScreen / pointer.sensitivity).toFixed(0)} · gyro ${pointer.hasGyro ? 'yes' : 'NO — orientation only'}`,
-    `mode        ${pointer.mode}`,
-    `hover       ${hovered === 'wii' ? 'OpenWii button' : hovered === 'qr' ? 'QR button' : hovered && hovered.dir !== undefined ? 'arrow' : hovered && hovered.game ? hovered.game.title : '—'}`,
+    `pointer     ${p0.display.x.toFixed(3)}, ${p0.display.y.toFixed(3)}`,
+    `gyro map    ${p0.describeMap()}`,
+    `rate        ${p0.rateDps.yaw.toFixed(1)} / ${p0.rateDps.pitch.toFixed(1)} deg/s`,
+    `deg/screen  ${(p0.degPerScreen / p0.sensitivity).toFixed(0)} · gyro ${p0.hasGyro ? 'yes' : 'NO — orientation only'}`,
+    `mode        ${p0.mode}`,
+    `players     ${perPlayer}`,
     `sensor      ${link.rate.toFixed(0)} Hz`,
     `channels    ${games.length}`,
   ].join('\n');
@@ -784,7 +871,11 @@ resize();
 requestAnimationFrame(frame);
 
 window.__openwii = {
-  scene, camera, renderer, tiles, arrows, pointer, audio, link,
+  scene, camera, renderer, tiles, arrows, pointer: inputFor(0).pointer, inputs, audio, link,
   hitTest, toWorld, pressA, pressB, step, layout: L,
-  state: () => ({ hovered, launching: !!launching, page, games, fps }),
+  state: () => ({
+    hovered: inputFor(0).hover,
+    hovers: [...inputs.entries()].map(([s, i]) => [s, hoverName(i.hover)]),
+    launching: !!launching, page, games, fps,
+  }),
 };
