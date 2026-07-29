@@ -26,10 +26,15 @@ const FORCE_HTTP = process.env.HTTP === '1';
 const GAMES_DIR = path.join(__dirname, 'games');
 
 const app = express();
-app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
-app.use('/games', express.static(GAMES_DIR, { extensions: ['html'] }));
+// no-cache (NOT no-store): browsers must revalidate every file against its
+// ETag on each load, so a plain reload after a git pull always runs current
+// code — while unchanged files still come back as cheap 304s. Heuristic
+// freshness on module scripts otherwise happily serves a stale game.js.
+const NO_CACHE = { setHeaders: (res) => res.set('Cache-Control', 'no-cache') };
+app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'], ...NO_CACHE }));
+app.use('/games', express.static(GAMES_DIR, { extensions: ['html'], ...NO_CACHE }));
 // The shared motion engine, imported directly by games as ES modules.
-app.use('/core', express.static(path.join(__dirname, 'core')));
+app.use('/core', express.static(path.join(__dirname, 'core'), NO_CACHE));
 // Three.js straight from node_modules — no build step, no bundler.
 app.use('/vendor/three', express.static(path.join(__dirname, 'node_modules', 'three', 'build')));
 // Optional audio overrides. Gitignored: nothing copyrighted ships by default.
