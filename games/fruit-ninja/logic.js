@@ -15,23 +15,34 @@ import { Trail, segmentDistance } from '../../core/trail.js';
 export const FIELD_H = 9;
 export const GRAVITY = 18.75;          // world units/s², = the old 1500 px/s²
 export const MIN_SLICE_SPEED = 3.25;   // world units/s, = the old 260 px/s
+export const CRITICAL_CHANCE = 0.05;   // like the original: rare, +10, gold burst
+export const BOMB_PENALTY = 10;        // practice mode: bombs cost points, not the run
+
+/**
+ * The classic line-up. `splat` is the juice that stains the dojo wall — it is
+ * the flesh colour, not the rind: a watermelon splats red, a kiwi green.
+ */
 export const FRUIT_TYPES = [
-  { name: 'watermelon', rind: 0x2f8f4e, flesh: 0xff4d5e, r: 0.65 },
-  { name: 'orange', rind: 0xff9f1c, flesh: 0xffbe55, r: 0.53 },
-  { name: 'lime', rind: 0x7ec850, flesh: 0xc9e88a, r: 0.48 },
-  { name: 'plum', rind: 0x8e5cd9, flesh: 0xd9b8ff, r: 0.5 },
-  { name: 'peach', rind: 0xff7a6b, flesh: 0xffd0b0, r: 0.55 },
-  { name: 'blueberry', rind: 0x4d7cff, flesh: 0xa8c0ff, r: 0.43 },
+  { name: 'watermelon', rind: 0x27691f, flesh: 0xf1373b, splat: 0xd92a35, r: 0.72 },
+  { name: 'pineapple', rind: 0xd9a13b, flesh: 0xf7de74, splat: 0xf0c945, r: 0.62 },
+  { name: 'strawberry', rind: 0xd8261f, flesh: 0xf7a9a0, splat: 0xd92a35, r: 0.48 },
+  { name: 'orange', rind: 0xf28511, flesh: 0xffb840, splat: 0xff9a1f, r: 0.52 },
+  { name: 'kiwi', rind: 0x7a5b39, flesh: 0x8cc63f, splat: 0x7fb832, r: 0.46 },
+  { name: 'lemon', rind: 0xf5d321, flesh: 0xfbe97b, splat: 0xf2d93b, r: 0.48 },
+  { name: 'apple', rind: 0x7bb92e, flesh: 0xf4f0d5, splat: 0xb9d152, r: 0.52 },
+  { name: 'peach', rind: 0xf5923e, flesh: 0xfad089, splat: 0xf5a623, r: 0.54 },
 ];
 
 const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
 export class FruitNinja {
-  constructor({ aspect = 16 / 9, onEvent = () => {} } = {}) {
+  constructor({ aspect = 16 / 9, onEvent = () => {}, infiniteLives = false, rng = Math.random } = {}) {
     this.h = FIELD_H;
     this.w = FIELD_H * aspect;
     this.onEvent = onEvent;
+    this.infiniteLives = infiniteLives;   // practice: misses and bombs never end the run
+    this.rng = rng;                        // injected so criticals are testable
 
     this.state = {
       phase: 'idle',        // idle | playing | over
@@ -96,6 +107,7 @@ export class FruitNinja {
       kind,
       id: FruitNinja.nextId++,
     });
+    this.onEvent({ type: 'launch', bomb: !!isBomb });
   }
 
   slice(f, angle, now) {
@@ -124,7 +136,7 @@ export class FruitNinja {
       this.particles.push({
         x: f.x, y: f.y,
         vx: Math.cos(a) * s, vy: Math.sin(a) * s + rand(0, 1.8),
-        r: rand(0.03, 0.1), color: f.kind.rind, life: 1, decay: rand(0.7, 1.6),
+        r: rand(0.03, 0.1), color: f.kind.splat, life: 1, decay: rand(0.7, 1.6),
         id: FruitNinja.nextId++,
       });
     }
@@ -179,15 +191,26 @@ export class FruitNinja {
           this.fruits.splice(i, 1);
           if (f.bomb) {
             this.explode(f);
-            this.onEvent({ type: 'bomb' });
-            this.end(now);
+            if (this.infiniteLives) {
+              // Practice: the blast costs points, not the run.
+              this.state.score = Math.max(0, this.state.score - BOMB_PENALTY);
+              this.state.combo = 0;
+              this.onEvent({ type: 'bomb', fatal: false, x: f.x, y: f.y });
+            } else {
+              this.onEvent({ type: 'bomb', fatal: true, x: f.x, y: f.y });
+              this.end(now);
+            }
           } else {
             this.slice(f, Math.atan2(s.y2 - s.y1, s.x2 - s.x1), now);
             this.state.combo = now < this.state.comboUntil ? this.state.combo + 1 : 1;
             this.state.comboUntil = now + 260;
-            const gained = 1 + (this.state.combo > 1 ? this.state.combo : 0);
+            const critical = this.rng() < CRITICAL_CHANCE;
+            const gained = 1 + (this.state.combo > 1 ? this.state.combo : 0) + (critical ? 10 : 0);
             this.state.score += gained;
-            this.onEvent({ type: 'slice', combo: this.state.combo, gained, x: f.x, y: f.y });
+            this.onEvent({
+              type: 'slice', combo: this.state.combo, gained, critical,
+              x: f.x, y: f.y, kind: f.kind, r: f.r,
+            });
           }
           break;
         }
@@ -197,8 +220,8 @@ export class FruitNinja {
       if (f.y + f.r < floor) {
         this.fruits.splice(i, 1);
         if (!f.bomb && this.state.phase === 'playing') {
-          this.state.lives -= 1;
-          this.onEvent({ type: 'miss', lives: this.state.lives });
+          if (!this.infiniteLives) this.state.lives -= 1;
+          this.onEvent({ type: 'miss', lives: this.state.lives, x: f.x });
           if (this.state.lives <= 0) this.end(now);
         }
       }

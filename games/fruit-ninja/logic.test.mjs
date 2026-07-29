@@ -114,3 +114,68 @@ test('losing the last life ends the game', () => {
   assert.equal(g.state.lives, 0);
   assert.equal(g.state.phase, 'over', 'game over');
 });
+
+// ── Practice mode and criticals ──────────────────────────────────────────────
+
+function practiceGame(rng = () => 0.99) {
+  const g = new FruitNinja({ aspect: 16 / 9, infiniteLives: true, rng });
+  g.start(0);
+  g.state.nextSpawn = Infinity;
+  return g;
+}
+
+test('practice: dropped fruit never costs a life or ends the run', () => {
+  const g = practiceGame();
+  for (let n = 0; n < 10; n += 1) {
+    const f = put(g, 0, -FIELD_H / 2 - 2);
+    f.vy = -1;
+    g.update(16 * (n + 1), 0.016);
+  }
+  assert.equal(g.state.lives, 3, 'lives untouched after 10 drops');
+  assert.equal(g.state.phase, 'playing', 'still playing');
+});
+
+test('practice: a bomb explodes and costs points, not the run', () => {
+  const g = practiceGame();
+  g.state.score = 25;
+  const clock = { t: 0 };
+  put(g, 0, 0, true);
+  sweep(g, -3, 3, 0, 5, 16, clock);
+  assert.equal(g.state.phase, 'playing', 'run continues');
+  assert.equal(g.state.score, 15, 'bomb penalty applied');
+  assert.ok(g.particles.length > 50, 'still explodes visually');
+});
+
+test('practice: bomb penalty never takes the score negative', () => {
+  const g = practiceGame();
+  g.state.score = 3;
+  const clock = { t: 0 };
+  put(g, 0, 0, true);
+  sweep(g, -3, 3, 0, 5, 16, clock);
+  assert.equal(g.state.score, 0);
+});
+
+test('a critical slice pays +10 and is flagged in the event', () => {
+  const events = [];
+  const g = new FruitNinja({ aspect: 16 / 9, rng: () => 0, onEvent: (e) => events.push(e) });
+  g.start(0);
+  g.state.nextSpawn = Infinity;
+  const clock = { t: 0 };
+  put(g, 0, 0);
+  sweep(g, -3, 3, 0, 5, 16, clock);
+  const slice = events.find((e) => e.type === 'slice');
+  assert.equal(slice.critical, true);
+  assert.equal(slice.gained, 11, '1 base + 10 critical');
+  assert.equal(g.state.score, 11);
+});
+
+test('spawning emits a launch event (the throw sound hook)', () => {
+  const events = [];
+  const g = new FruitNinja({ aspect: 16 / 9, onEvent: (e) => events.push(e) });
+  g.start(0);
+  g.spawn(false, 1000);
+  g.spawn(true, 1000);
+  const launches = events.filter((e) => e.type === 'launch');
+  assert.equal(launches.length, 2);
+  assert.deepEqual(launches.map((e) => e.bomb), [false, true]);
+});

@@ -14,13 +14,14 @@
 const EXTENSIONS = ['mp3', 'wav', 'ogg'];
 
 /**
- * Global mute, currently ON.
+ * Global mute, currently OFF — sound is on.
  *
- * Turned off during development because a background tab kept playing the menu
- * loop. Flip this single flag to bring the whole sound design back — every cue
- * and the music route through it, so nothing needs re-wiring.
+ * It was muted for a while because a background tab kept playing the menu
+ * loop; the engine now suspends itself whenever its tab is hidden (see the
+ * visibilitychange hook in the constructor), which removes that whole failure
+ * class rather than the one instance.
  */
-export const AUDIO_MUTED = true;
+export const AUDIO_MUTED = false;
 
 export class AudioEngine {
   constructor({ basePath = '/audio', volume = 0.7, muted = AUDIO_MUTED } = {}) {
@@ -35,6 +36,16 @@ export class AudioEngine {
     this.music = null;
     this.enabled = true;
     registerDefaults(this);
+
+    // A hidden tab makes no sound, ever. This is why the global mute existed;
+    // suspending at the source kills the background-tab loop for every page.
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        if (!this.ctx) return;
+        if (document.hidden) this.ctx.suspend();
+        else if (this.ctx.state === 'suspended') this.ctx.resume();
+      });
+    }
   }
 
   /**

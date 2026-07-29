@@ -4,115 +4,160 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Fruit Ninja — OpenWii</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Permanent+Marker&display=swap" rel="stylesheet" />
 <style>
   * { box-sizing: border-box; }
   html, body {
     margin: 0; height: 100%; overflow: hidden; cursor: none;
-    background: #0b0e14; color: #e8ecf4;
+    background: #2b1a0c; color: #f5ead6;
     font: 500 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     user-select: none;
   }
   canvas { display: block; position: absolute; inset: 0; width: 100%; height: 100%; }
+  .brush { font-family: "Permanent Marker", "Comic Sans MS", cursive; font-weight: 400; }
 
   /* ── HUD ─────────────────────────────────────────────────────────────── */
-  #hud {
-    position: absolute; inset: 0; pointer-events: none;
-    padding: 28px 34px; display: flex; flex-direction: column;
+  #hud { position: absolute; inset: 0; pointer-events: none; padding: 22px 30px; }
+
+  #score-wrap { position: absolute; left: 30px; top: 18px; }
+  #score-row { display: flex; align-items: center; gap: 12px; }
+  #score-ico { font-size: 34px; filter: drop-shadow(0 3px 6px #0009); }
+  #score-v {
+    font-family: "Permanent Marker", cursive; font-size: 58px; line-height: 1; color: #fff;
+    text-shadow: 0 0 2px #000, 3px 3px 0 #3a220c, 0 6px 18px #000c;
+    font-variant-numeric: tabular-nums;
   }
-  #hud-top { display: flex; align-items: flex-start; gap: 28px; }
-
-  #score { font-size: 56px; font-weight: 800; letter-spacing: -0.03em; line-height: 1;
-           text-shadow: 0 4px 24px #000a; font-variant-numeric: tabular-nums; }
-  #score small { display: block; font-size: 12px; font-weight: 600; letter-spacing: .18em;
-                 text-transform: uppercase; color: #8b95ad; margin-bottom: 6px; }
-  #best { font-size: 13px; color: #8b95ad; margin-top: 8px; font-variant-numeric: tabular-nums; }
-
-  #lives { margin-left: auto; display: flex; gap: 8px; font-size: 30px; }
-  #lives span { opacity: .25; transition: opacity .2s; }
-  #lives span.on { opacity: 1; filter: drop-shadow(0 2px 10px #ff5f6d66); }
-
-  #combo {
-    position: absolute; left: 50%; top: 86px; transform: translateX(-50%);
-    font-size: 30px; font-weight: 800; color: #ffd166; opacity: 0;
-    transition: opacity .18s; text-shadow: 0 3px 20px #000a; white-space: nowrap;
+  #best {
+    font-family: "Permanent Marker", cursive; font-size: 17px; color: #ffcf4d;
+    text-shadow: 0 0 2px #000, 2px 2px 0 #3a220c; margin: 6px 0 0 2px; letter-spacing: .06em;
   }
-  #combo.on { opacity: 1; }
+
+  #lives { position: absolute; right: 30px; top: 16px; text-align: right; }
+  #lives .x {
+    font-family: "Permanent Marker", cursive; font-size: 44px; line-height: 1;
+    color: #4fa7e8; -webkit-text-stroke: 1px #123; margin-left: 10px;
+    text-shadow: 0 0 2px #000, 2px 3px 0 #16273a, 0 5px 14px #000b;
+    display: inline-block; transition: color .15s, transform .15s;
+  }
+  #lives .x.lost { color: #e8372b; text-shadow: 0 0 2px #000, 2px 3px 0 #3a1210, 0 5px 14px #000b;
+                   transform: scale(1.12); }
+  #practice {
+    font-family: "Permanent Marker", cursive; font-size: 14px; color: #ffcf4d;
+    text-shadow: 0 0 2px #000, 1px 2px 0 #3a220c; margin-top: 4px; letter-spacing: .08em;
+  }
+
+  /* Floating slice text. */
+  #fx { position: absolute; inset: 0; overflow: hidden; }
+  .splash {
+    position: absolute; transform: translate(-50%, -50%);
+    font-family: "Permanent Marker", cursive; white-space: nowrap;
+    animation: splash-pop .95s ease-out forwards; will-change: transform, opacity;
+  }
+  .splash.plus { font-size: 26px; color: #fff; text-shadow: 0 0 2px #000, 2px 2px 0 #3a220c; }
+  .splash.combo { font-size: 42px; color: #ffb52e;
+    text-shadow: 0 0 3px #000, 3px 3px 0 #4a2a08, 0 0 26px #ffb52e88; }
+  .splash.crit { font-size: 48px; color: #ffe14d;
+    text-shadow: 0 0 3px #000, 3px 3px 0 #4a3708, 0 0 30px #ffe14daa; }
+  .splash.penalty { font-size: 40px; color: #ff5040;
+    text-shadow: 0 0 3px #000, 3px 3px 0 #3a0e08; }
+  @keyframes splash-pop {
+    0%   { opacity: 0; transform: translate(-50%, -50%) scale(.4) rotate(-6deg); }
+    18%  { opacity: 1; transform: translate(-50%, -50%) scale(1.12) rotate(2deg); }
+    30%  { transform: translate(-50%, -50%) scale(1) rotate(0deg); }
+    75%  { opacity: 1; }
+    100% { opacity: 0; transform: translate(-50%, -68%) scale(1); }
+  }
+
+  /* The red ✗ where a fruit hit the floor. */
+  #miss-x {
+    position: absolute; bottom: 16%; left: 50%; transform: translate(-50%, 0) scale(.3);
+    font-family: "Permanent Marker", cursive; font-size: 96px; color: #e8372b;
+    text-shadow: 0 0 4px #000, 4px 4px 0 #3a0e08; opacity: 0; pointer-events: none;
+  }
+  #miss-x.on { animation: miss-pop .75s ease-out forwards; }
+  @keyframes miss-pop {
+    0%   { opacity: 0; transform: translate(-50%, 0) scale(.3); }
+    20%  { opacity: 1; transform: translate(-50%, 0) scale(1.25); }
+    35%  { transform: translate(-50%, 0) scale(1); }
+    70%  { opacity: 1; }
+    100% { opacity: 0; transform: translate(-50%, 0) scale(1.05); }
+  }
+
+  /* Bomb hit: white-out. */
+  #flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
+  #flash.on { animation: white-out .55s ease-out forwards; }
+  @keyframes white-out { 0% { opacity: 1; } 100% { opacity: 0; } }
 
   #link {
-    position: absolute; right: 34px; bottom: 28px; display: flex; align-items: center; gap: 9px;
-    font-size: 13px; color: #8b95ad; background: #141926cc; border: 1px solid #232a3b;
+    position: absolute; right: 30px; bottom: 24px; display: flex; align-items: center; gap: 9px;
+    font-size: 13px; color: #d8c2a0; background: #1d1006cc; border: 1px solid #4a3319;
     padding: 9px 14px; border-radius: 999px; backdrop-filter: blur(8px);
   }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: #4b5468; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #6b5638; }
   .dot.on { background: #35d07f; box-shadow: 0 0 10px #35d07f99; }
 
-  #keys {
-    position: absolute; left: 34px; bottom: 28px; font-size: 12px;
-    color: #59637a; letter-spacing: .02em;
+  #keys { position: absolute; left: 30px; bottom: 24px; font-size: 12px; color: #b39468; }
+  #keys a { color: #b39468; text-decoration: none; pointer-events: auto; }
+  #keys a:hover { color: #f5ead6; }
+  #keys kbd {
+    background: #1d1006; border: 1px solid #4a3319; border-bottom-width: 2px;
+    border-radius: 5px; padding: 1px 6px; font: inherit; font-size: 11px; color: #d8c2a0;
   }
+
   #toast {
     position: absolute; left: 50%; bottom: 78px; transform: translateX(-50%);
-    font-size: 13px; font-weight: 600; letter-spacing: .1em; color: #8b95ad;
-    opacity: 0; transition: opacity .25s; white-space: nowrap;
+    font-size: 13px; font-weight: 600; letter-spacing: .1em; color: #ffcf4d;
+    text-shadow: 0 1px 4px #000; opacity: 0; transition: opacity .25s; white-space: nowrap;
   }
   #toast.on { opacity: 1; }
   #debug {
-    position: absolute; right: 34px; top: 92px; margin: 0; display: none;
-    background: #0b0e14dd; border: 1px solid #232a3b; border-radius: 12px;
+    position: absolute; right: 30px; top: 118px; margin: 0; display: none;
+    background: #180d04dd; border: 1px solid #4a3319; border-radius: 12px;
     padding: 14px 16px; font: 12px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace;
-    color: #8b95ad; white-space: pre;
+    color: #d8c2a0; white-space: pre;
   }
   #debug.on { display: block; }
-
-  #keys a { color: #8b95ad; text-decoration: none; pointer-events: auto; }
-  #keys a:hover { color: #e8ecf4; }
-  #keys kbd {
-    background: #1b2231; border: 1px solid #2b3448; border-bottom-width: 2px;
-    border-radius: 5px; padding: 1px 6px; font: inherit; font-size: 11px; color: #8b95ad;
-  }
 
   /* ── Overlays ────────────────────────────────────────────────────────── */
   #overlay {
     position: absolute; inset: 0; display: grid; place-items: center;
-    background: radial-gradient(ellipse at 50% 40%, #131a28ee, #0b0e14fa 70%);
+    background: radial-gradient(ellipse at 50% 40%, #3a2410ee, #1d1106fa 70%);
     backdrop-filter: blur(3px); z-index: 5;
   }
   #overlay.hide { display: none; }
   .panel { text-align: center; max-width: 620px; padding: 0 32px; }
-  .panel h1 { font-size: 60px; margin: 0 0 6px; letter-spacing: -0.04em; font-weight: 800; }
-  .panel h1 em { font-style: normal;
-    background: linear-gradient(120deg, #ff5f6d, #ffd166);
-    -webkit-background-clip: text; background-clip: text; color: transparent; }
-  .panel p { color: #8b95ad; margin: 0 auto 26px; max-width: 460px; }
+  .panel h1 {
+    font-family: "Permanent Marker", cursive; font-size: 64px; margin: 0 0 10px;
+    font-weight: 400; color: #fff; text-shadow: 0 0 3px #000, 4px 4px 0 #3a220c;
+  }
+  .panel h1 em { font-style: normal; color: #ffb52e; }
+  .panel h1.gameover { color: #e8372b; font-size: 88px; letter-spacing: .02em;
+    text-shadow: 0 0 4px #000, 5px 5px 0 #2a0a06, 0 0 44px #e8372b55; }
+  .panel p { color: #d8c2a0; margin: 0 auto 26px; max-width: 460px; }
 
-  #pair { display: flex; align-items: center; gap: 26px; justify-content: center;
-          background: #141926; border: 1px solid #232a3b; border-radius: 20px; padding: 22px; }
-  #pair img { width: 168px; height: 168px; border-radius: 12px; background: #fff; }
-  #pair-info { text-align: left; }
-  #pair-info b { display: block; font-size: 15px; margin-bottom: 6px; }
-  #pair-url { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
-              color: #ffd166; word-break: break-all; }
-  #pair-info ol { color: #8b95ad; font-size: 13px; padding-left: 18px; margin: 12px 0 0; }
-  #pair-info li { margin-bottom: 3px; }
-
-  .cta { margin-top: 26px; font-size: 14px; color: #59637a; }
-  .cta strong { color: #e8ecf4; }
-  #final { font-size: 22px; color: #e8ecf4; margin-bottom: 8px; }
-  #final b { color: #ffd166; }
+  .cta { margin-top: 26px; font-size: 14px; color: #b39468; }
+  .cta strong { color: #f5ead6; }
+  #final { font-family: "Permanent Marker", cursive; font-size: 26px; color: #f5ead6; }
+  #final b { color: #ffcf4d; }
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
 
 <div id="hud">
-  <div id="hud-top">
-    <div>
-      <div id="score"><small>Score</small><span id="score-v">0</span></div>
-      <div id="best">Best 0</div>
-    </div>
-    <div id="lives"><span>❌</span><span>❌</span><span>❌</span></div>
+  <div id="score-wrap">
+    <div id="score-row"><span id="score-ico">🍉</span><span id="score-v">0</span></div>
+    <div id="best">BEST: 0</div>
   </div>
-  <div id="combo"></div>
+  <div id="lives">
+    <div><span class="x">✗</span><span class="x">✗</span><span class="x">✗</span></div>
+    <div id="practice">PRACTICE · ∞ LIVES</div>
+  </div>
+  <div id="fx"></div>
+  <div id="miss-x">✗</div>
+  <div id="flash"></div>
   <div id="keys">
     <a href="/" id="back">← Games</a> &nbsp;
     <kbd>Space</kbd> start &nbsp; <kbd>C</kbd> re-center &nbsp;
@@ -123,24 +168,8 @@
   <pre id="debug"></pre>
 </div>
 
-<div id="overlay">
-  <div class="panel" id="panel">
-    <h1>🍉 <em>Fruit Ninja</em></h1>
-    <p>Your phone is the sword. Swing it in the air — the blade on this screen follows.</p>
-    <div id="pair">
-      <img id="pair-qr" alt="Pairing QR code" />
-      <div id="pair-info">
-        <b>Scan with your phone</b>
-        <div id="pair-url">…</div>
-        <ol>
-          <li>Same Wi-Fi as this computer</li>
-          <li>Accept the certificate warning</li>
-          <li>Tap <strong>Enable motion sensors</strong></li>
-        </ol>
-      </div>
-    </div>
-    <div class="cta" id="cta">Waiting for a controller… press <strong>Space</strong> to play with the mouse.</div>
-  </div>
+<div id="overlay" class="hide">
+  <div class="panel" id="panel"></div>
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
