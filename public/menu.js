@@ -380,14 +380,6 @@ function drawBar() {
     g.fillText('✉', rx, cy + 2);
   }
 
-  // SD card slot, purely decorative, tucked by the left button.
-  roundRect(g, lx + r * 1.45, cy + r * 0.1, r * 0.62, r * 0.52, 5);
-  g.fillStyle = '#c2cdda';
-  g.fill();
-  g.strokeStyle = '#aab7c6';
-  g.lineWidth = 2;
-  g.stroke();
-
   // The clock, centre stage: big, chunky, quiet LCD grey — a landmark, like
   // the original. Shrinks on narrow bars so it never collides with the buttons.
   const now = new Date();
