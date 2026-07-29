@@ -40,7 +40,7 @@ reference for the games.
 | Art | Low-poly originals built procedurally in code. No binary model assets. |
 | Audio | Synthesized sound-alikes via Web Audio. Every cue overridable by dropping a file, so real audio can be swapped in later without code changes. |
 | Players | Single player. Room/slot protocol designed for multi from the start so adding phones later is not a rewrite. |
-| Pointer | **Absolute** — cursor position is the angle off the calibrated neutral. Point at the corner, the cursor is at the corner. *(Revised 2026-07-28: the interview chose hybrid; playtesting showed the drift correction was the thing making the cursor feel imprecise, so we moved to the option originally recommended. See below.)* |
+| Pointer | **Rate-based gyro aiming** *(rewritten from scratch 2026-07-28 after six rounds of patching absolute/hybrid pointing; supersedes both earlier decisions — see "The pointer, rebuilt" below).* Cursor velocity = angular velocity from the raw gyroscope, the design every post-Wii console uses for gyro-without-optics (Splatoon, Zelda, Steam Input) and what the ZIG SIM demo behind this project does. No calibration flow at all: pair and play. |
 | Sequencing | Depth-first. Foundation, then the menu, then Swordplay as the reference game. |
 
 ### Channel lineup
@@ -192,62 +192,39 @@ screen took a whole-arm movement. Now clamped so pointing stays wrist-scale, and
 speed is adjustable live with ←/→ and remembered across restarts — it is a
 preference, not something calibration can derive.
 
-### The pointer mode, revisited
+### The pointer, rebuilt from scratch
 
-The interview offered absolute, relative, and hybrid. Absolute was recommended —
-"what the Wii actually does and the iconic feel" — and hybrid was chosen. Four
-rounds of playtest feedback later, hybrid's drift correction turned out to be
-the thing making the cursor feel imprecise, so we moved to absolute.
+Six rounds of feedback ("slow", "imprecise", "jittery", "circles") were each
+met with a measured fix — filter constants, per-frame prediction, noise gating,
+gyro fusion, drift-correction surgery — and each fix surfaced the next problem.
+That pattern is the diagnosis: the architecture was wrong, not the tuning.
 
-The mechanism: drift correction treats a persistent non-zero mean as sensor
-error. That is true while someone is *using* the pointer and false while they
-are *holding* an aim, where it reads the deliberate offset as drift and
-subtracts it. Measured, a steady aim slid 28% of screen width in a minute.
-Gating it on movement fixed the worst case, but any correction at all means the
-cursor quietly disagrees with the phone about where you are pointing — which is
-precisely the illusion a laser pointer depends on.
+The root constraint: absolute pointing needs an absolute reference. The Wii
+Remote had one — an IR camera watching the sensor bar. A phone has nothing to
+look at, so absolute designs are necessarily built on `deviceorientation`,
+which is the OS's fused estimate: inherently lagged, yaw referenced to a
+wandering magnetometer. The 448-line pointer was compensation for that choice.
 
-Absolute now measures **0.0% error**: point at a spot, the cursor is on it, and
-it is still on it thirty seconds later.
+The rewrite (~190 lines) is rate-based gyro aiming: cursor velocity = angular
+velocity, straight from the raw gyroscope. Yaw is the gyro projected onto
+world-up, pitch is rotation about the phone's right edge — grip-agnostic by
+construction, so **the calibration flow is deleted entirely**. Drift is a
+non-issue: the cursor clamps at the screen edges and the player self-corrects,
+exactly as a mouse recovers from the edge of a desk. Re-centre (C, or the
+phone button) snaps to the middle.
 
-Gyro fusion is orthogonal and still applies. Fusion is about *latency*; drift
-correction is about *reference*. Keeping the first and dropping the second gives
-directness and immediacy together — at 60ms of OS fusion lag, 4.0% error with
-the gyro versus 13.0% without.
+One learned scalar absorbs the platform mess: browsers disagree on
+`rotationRate` units (deg/s vs rad/s — a 57× difference that alone reads as
+"the cursor is really slow") and have historically disagreed on sign. The gain
+is learned by comparing gyro-integrated angle against orientation heading
+change over ~150ms windows — windowed because differencing noisy orientation
+per-sample amplifies noise 60× and once fooled the gate.
 
-The cost, stated plainly: nothing corrects yaw wander any more, so the cursor
-can slowly lose its zero. The remedy is re-centring (`C`, or the phone's
-button). The Wii doesn't need one because IR gives it a genuine external
-reference; a phone has no sensor bar to look at.
-
----
-
-## Phase 2 — Swordplay (reference game)
-
-The game that sets the bar for every one after it. Judged on feel.
-
-**Acceptance**
-- Blade orientation tracks the phone 1:1 — roll, pitch and yaw all read.
-- Blocking works: a block succeeds or fails based on blade angle, not timing
-  alone.
-- Hit detection distinguishes a swing from a wave, using the same speed-window
-  approach proven in Fruit Ninja.
-- A full match against AI is completable, with a win and a loss state.
-- O2 latency holds during combat, not just in the menu.
-
----
-
-## Phases 3–5
-
-Criteria firm up when each is reached; these are the headline bars.
-
-| Phase | Game | Headline bar |
-|---|---|---|
-| 3 | Table Tennis + Golf | Built together — both are "swing at a ball", so they share a physics and swing-detection module. A rally is sustainable; a golf ball is landable on a green. |
-| 4 | Island Flyover | An island worth flying over. Highest art risk of the project: procedural geometry has to carry an entire explorable world. |
-| 5 | Mario Kart (time trial) | Tilt-steering that feels good enough to want a second lap. One circuit, a working lap timer, a ghost. |
-
----
+Verified (all numeric, no hand-derived sign conventions): deg/s, rad/s and
+mirrored phones all track a sweep within 5–6% demeaned error; 200ms of
+orientation lag does not slow the cursor at all; a vertical swing produces no
+horizontal motion at any grip roll; the cursor is still at rest; stillness
+never corrupts the learned gain; packets stopping freezes rather than coasts.
 
 ## Risks
 

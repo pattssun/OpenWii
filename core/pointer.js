@@ -1,448 +1,203 @@
 import { clamp, dot, angleDelta, axesFromSample, DEG } from './orientation.js';
-import { OneEuro } from './filter.js';
-import { anglesIn, forwardOf } from './calibration.js';
-
-const norm = (v) => {
-  const L = Math.hypot(v.x, v.y, v.z) || 1;
-  return { x: v.x / L, y: v.y / L, z: v.z / L };
-};
-
-export const MODES = ['absolute', 'hybrid', 'relative', 'gyro'];
 
 /**
- * Screen pointer driven by phone attitude.
+ * The pointer, rebuilt from scratch: rate-based gyro aiming.
  *
- *   absolute — DEFAULT. Cursor position IS the angle off your calibrated
- *              neutral: point at the corner and the cursor is at the corner.
- *              This is what the Wii Remote does, and nothing else feels like
- *              it. Every mode below trades that directness for something, and
- *              the trade is never worth it for pointing.
+ * Why this design and not absolute pointing
+ * ------------------------------------------
+ * The phone offers two motion signals. `deviceorientation` is the OS's fused
+ * attitude estimate — absolute, but inherently lagged, with yaw referenced to
+ * a magnetometer that wanders. `rotationRate` is the raw gyroscope — a clean,
+ * zero-lag angular *velocity* with no absolute reference at all.
  *
- *              Gyro fusion still applies — that is about latency, not drift,
- *              and it is what makes the directness feel instant rather than
- *              merely correct. The cost of pure absolute is that yaw wander
- *              is never corrected, so re-centring (C, or the phone's button)
- *              is the remedy. The Wii doesn't need one because IR is a genuine
- *              external reference; a phone has no sensor bar to look at.
- *   hybrid   — absolute plus slow drift correction. Cancels wander at the cost
- *              of the cursor quietly disagreeing with where you are pointing.
- *   relative — integrates the *change* in angle, like a mouse. Never gets lost;
- *              never feels like pointing at the screen.
- *   gyro     — integrates rotationRate directly. Ignores the magnetometer.
+ * Absolute pointing needs an absolute reference. The Wii Remote had one: an IR
+ * camera watching the sensor bar. A phone has nothing to look at, so every
+ * absolute design ends up built on the laggy orientation estimate and then
+ * buried under compensation — filters, prediction, drift correction, fusion.
+ * A previous version of this file was 448 lines of exactly that, and each fix
+ * surfaced a new artifact.
+ *
+ * Rate-based aiming is what the industry converged on for gyro-without-optics:
+ * Splatoon, Zelda, Steam Input. Cursor velocity = angular velocity. The gyro's
+ * cleanliness becomes precision, its zero lag becomes immediacy, and drift is
+ * a non-problem because the cursor clamps at the screen edges and the player
+ * self-corrects — the same way a mouse recovers from hitting the edge of a
+ * desk. It is also how the ZIG SIM demo that inspired this project works.
+ *
+ * The mapping
+ * -----------
+ *   yaw rate   = ω · up      (rotation about world-up — turning left/right)
+ *   pitch rate = ω · x_body  (rotation about the phone's right edge — up/down)
+ *
+ * `up` expressed in the body frame comes from the orientation sample. Its lag
+ * is harmless here: only the *direction* of gravity is taken from it, which
+ * changes slowly, never the pointer's motion. This projection makes the
+ * pointer grip-agnostic — flat like a Wii Remote or upright like a TV remote,
+ * rotation about world-up is yaw either way. No calibration step required.
+ *
+ * The one learned constant
+ * ------------------------
+ * Browsers disagree about `rotationRate`: most report deg/s, some rad/s (a
+ * 57× difference — a cursor 57× too slow), and sign conventions have
+ * historically varied. One scalar `k` absorbs all of it, learned by comparing
+ * total gyro-integrated angle against total orientation heading change during
+ * real motion. The magnitude ratio uses summed absolute increments, which is
+ * immune to the orientation lag's phase shift; the sign comes from their
+ * correlation. Until enough motion has been seen, k stays 1 (correct for the
+ * common deg/s case).
  */
 export class Pointer {
   constructor(options = {}) {
-    this.mode = options.mode || 'absolute';
     this.sensitivity = options.sensitivity ?? 1;
-    this.degPerScreenX = options.degPerScreenX ?? 55;
-    this.degPerScreenY = options.degPerScreenY ?? 38;
+    // Degrees of turn to cross the full screen width at sensitivity 1.
+    this.degPerScreen = options.degPerScreen ?? 30;
+    // Vertical uses a tighter span — screens are wide, wrists pitch less.
+    this.aspect = options.aspect ?? 0.6;
+    // Below this angular speed the hand is trembling, not aiming. Ignoring it
+    // keeps the cursor rock-still at rest with no smoothing lag while moving.
+    this.deadzoneDps = options.deadzoneDps ?? 0.3;
     this.invertX = false;
     this.invertY = false;
 
-    // Relative-mode spring back toward centre; hybrid uses drift correction
-    // instead, which is strictly better when an absolute reference exists.
-    this.recenterSpring = options.recenterSpring ?? 0.35;
+    this.pos = { x: 0.5, y: 0.5 };
+    this.rate = { x: 0, y: 0 };            // screen fractions per second
+    this.rateDps = { yaw: 0, pitch: 0 };   // for the debug overlay
 
-    /**
-     * Drift correction.
-     *
-     * Over a long window a player's aim centres on the screen — they are, after
-     * all, pointing at it. So a persistent non-zero mean is drift, not
-     * intention. We low-pass the angle with a very long time constant and
-     * subtract it. `driftTau` has to stay far longer than any deliberate aim:
-     * at 45s, holding a corner for five seconds moves the estimate ~10%, while
-     * degrees-per-minute magnetometer wander is absorbed completely.
-     */
-    this.driftTau = options.driftTau ?? 45;
-    this.driftLimit = options.driftLimit ?? 25;      // degrees, hard ceiling
-    this.driftYaw = 0;
-    this.driftPitch = 0;
+    // Unit/sign auto-gain (see header). k maps reported gyro units to deg/s.
+    this.k = 1;
+    this.kAbsO = 0;      // Σ|orientation heading change|, degrees
+    this.kAbsG = 0;      // Σ|gyro yaw increment|, reported units
+    this.kDot = 0;       // Σ o·g — sign evidence
+    this.kLearned = false;
 
-    this.w = 1;
-    this.h = 1;
-    this.frame = null;
+    this.win = { head0: 0, g: 0, t: 0 };   // current learning window
+    this.prevUsedX = null;
 
-    /**
-     * Unfiltered aim accumulator. `position` is the *filtered* view of it.
-     *
-     * Accumulating onto the filtered value instead is a slow poison: smoothing
-     * gives pos += α(target − pos), so feeding it target = pos + delta collapses
-     * to pos += α·delta — every movement scaled by the smoothing coefficient,
-     * about 0.14 at rest. Small and medium movements land at a seventh of their
-     * intended size.
-     */
-    this.aim = { x: 0.5, y: 0.5 };            // normalised 0..1
-    this.position = { x: 0.5, y: 0.5 };
-
-    /**
-     * Smoothing.
-     *
-     * One Euro adapts as `cutoff = minCutoff + beta·|speed|`, so **beta is
-     * unit-dependent**. These filters used to run in pixels, where a fast swing
-     * gave speeds in the thousands and beta=0.012 opened the cutoff up to ~37Hz.
-     * Working in normalised 0..1 units shrank speed by a factor of the screen
-     * width, which silently collapsed the adaptive term to nothing — leaving a
-     * fixed 1.6Hz low-pass with ~250ms of settling lag at every speed. That
-     * reads exactly as "slow and imprecise": the cursor trails your hand, and
-     * the lag makes you overshoot every target.
-     *
-     * beta is now scaled for normalised units, and minCutoff raised so the
-     * resting case settles in ~80ms rather than ~250ms.
-     */
-    this.filterX = new OneEuro(options.minCutoff ?? 10, options.beta ?? 25);
-    this.filterY = new OneEuro(options.minCutoff ?? 10, options.beta ?? 25);
-
-    this.angles = { yaw: 0, pitch: 0 };
     this.live = false;
     this.lastSeen = 0;
-    this.prev = null;
-    this.lastAxes = null;
+    this.lastDraw = 0;
+    this.hasGyro = false;
+    this.mode = 'gyro-rate';
     this.source = '—';
-
-    /**
-     * Per-frame extrapolation.
-     *
-     * Packets arrive at whatever rate the phone's sensor runs; the display
-     * refreshes at its own. Reading the last packet's position straight into
-     * the render loop means the cursor is frozen on some frames and jumps two
-     * steps on others — the two rates beat against each other, and the result
-     * reads as a low refresh rate rather than as latency. So we track velocity
-     * and advance the cursor every frame instead of every packet.
-     *
-     * The same mechanism buys back latency: extrapolating slightly *past* now
-     * cancels the pipeline delay (phone → wire → render). `lead` is that
-     * compensation. Too much and reversals overshoot, which feels imprecise —
-     * hence the cap on total predicted displacement.
-     */
-    // Tuned against a simulated 60Hz sensor, 20ms pipeline delay and a 60Hz
-    // display. lead=30ms and a 4% cap give a mean tracking error of 2.6% of
-    // screen width at a one-sweep-per-second wave, with 3.5% overshoot at a
-    // hard stop that settles in ~130ms. Raising lead past this buys almost
-    // nothing and makes reversals rubber-band.
-    this.lead = options.lead ?? 0.03;            // seconds of latency to cancel
-    this.maxAhead = options.maxAhead ?? 0.09;    // never extrapolate further than this
-    this.maxLeap = options.maxLeap ?? 0.04;      // max predicted travel, screen fraction
-    this.velTau = options.velTau ?? 0.045;       // velocity smoothing
-    this.vel = { x: 0, y: 0 };                   // screen fractions per second
-    this.display = { x: 0.5, y: 0.5 };           // what the renderer should draw
-
-    /**
-     * Motion gate.
-     *
-     * At rest the velocity estimate is pure sensor noise, and extrapolating
-     * noise is worse than not extrapolating at all — measured, prediction
-     * amplified resting jitter by about 1.5x. So prediction fades in only once
-     * the pointer is moving faster than the hand's own noise floor. Below
-     * `gateLo` the drawn position is exactly the filtered position.
-     *
-     * Thresholds are set from the noise measured during calibration; these are
-     * fallbacks for an uncalibrated pointer.
-     */
-    this.gateLo = options.gateLo ?? 0.12;        // screen fractions/sec
-    this.gateHi = options.gateHi ?? 0.45;
-    this.noiseDeg = 0;
-
-    /**
-     * Complementary fusion — the thing that actually removes the latency.
-     *
-     * `deviceorientation` is not a sensor reading. It is the OS's *fused*
-     * attitude estimate, and that fusion carries tens of milliseconds of
-     * inherent lag that no downstream filtering can recover. The raw gyroscope
-     * (`rotationRate`) has almost none: it is a direct readout of angular
-     * velocity.
-     *
-     * So: integrate the gyro for immediate response, and bleed slowly toward
-     * the fused orientation to cancel the integration drift. Fast path for
-     * feel, slow path for truth. This is how a Wii Remote feels instant while
-     * still knowing where it is pointing.
-     */
-    this.fusionTau = options.fusionTau ?? 0.8;   // how fast orientation corrects the gyro
-
-    /**
-     * Which way the gyro points is decided by evidence, not by assumption.
-     *
-     * `rotationRate` sign conventions have differed between platforms, and
-     * getting it wrong makes the fast and slow paths fight each other — which
-     * would feel *worse* than no fusion at all, in a way that is hard to spot.
-     * So we correlate the gyro's projected rate against the orientation's own
-     * derivative and adopt whichever sign the data supports. Until there is
-     * enough evidence, fusion stays off and orientation drives alone.
-     */
-    this.gyroSign = 0;
-    this.gyroScore = { plus: 0, minus: 0, n: 0 };
-    this.fusedFwd = null;
-    this.prevFwd = null;
+    this.w = 1;
+    this.h = 1;
   }
 
-  /**
-   * Adapt to the phone's measured resting jitter.
-   *
-   * Two levers, and the useful one is not the obvious one. Smoothing barely
-   * helps — dropping the cutoff from 10Hz to 2.5Hz only cut wobble by a third
-   * while costing real responsiveness. Gating prediction and widening the
-   * angular mapping do far more, because jitter on screen is noise divided by
-   * degrees-per-screen.
-   */
-  setNoiseFloor(noiseDeg) {
-    this.noiseDeg = noiseDeg || 0;
-    if (!this.noiseDeg) return;
-    // Noise expressed as a fraction of the screen, then as the speed at which
-    // that much travel would look like real motion rather than tremor.
-    const noiseScreen = this.noiseDeg / this.degPerScreenX;
-    this.gateLo = clamp(noiseScreen / 0.16, 0.08, 1.2);
-    this.gateHi = this.gateLo * 3;
-    // A noisier sensor gets gentler smoothing-per-speed, but only modestly:
-    // this lever is weak and over-using it just adds lag.
-    const cut = clamp(11 - noiseScreen * 90, 4, 12);
-    this.filterX.minCutoff = cut;
-    this.filterY.minCutoff = cut;
-  }
+  get display() { return this.pos; }
+  get position() { return this.pos; }
+  get pixels() { return { x: this.pos.x * this.w, y: this.pos.y * this.h }; }
 
   setViewport(w, h) {
     this.w = Math.max(1, w);
     this.h = Math.max(1, h);
   }
 
-  setFrame(frame) {
-    this.frame = frame;
-    this.prev = null;
-  }
-
-  /** Apply calibration output (screen span per axis, plus the noise floor). */
-  applyCalibration(result) {
-    if (!result) return;
-    this.degPerScreenX = result.degPerScreenX;
-    this.degPerScreenY = result.degPerScreenY;
-    this.setNoiseFloor(result.noiseDeg);
-  }
-
   recentre() {
-    this.aim.x = 0.5;
-    this.aim.y = 0.5;
-    this.position.x = 0.5;
-    this.position.y = 0.5;
-    this.display.x = 0.5;
-    this.display.y = 0.5;
-    this.vel.x = 0;
-    this.vel.y = 0;
-    this.driftYaw = 0;
-    this.driftPitch = 0;
-    this.prev = null;
-    this.gyroSign = 0;
-    this.gyroScore = { plus: 0, minus: 0, n: 0 };
-    this.fusedFwd = null;
-    this.prevFwd = null;
-    this.filterX.reset();
-    this.filterY.reset();
+    this.pos.x = 0.5;
+    this.pos.y = 0.5;
+    this.rate.x = 0;
+    this.rate.y = 0;
   }
 
-  /** Pixel position, for renderers that want screen space. */
-  get pixels() {
-    return { x: this.display.x * this.w, y: this.display.y * this.h };
+  setFromMouse(nx, ny) {
+    this.pos.x = clamp(nx, 0, 1);
+    this.pos.y = clamp(ny, 0, 1);
+    this.rate.x = 0;
+    this.rate.y = 0;
   }
 
-  /**
-   * Feed one orientation sample. `dt` in seconds.
-   * Returns the normalised position, or null if no frame is calibrated yet.
-   */
+  /** Feed one packet from the phone. `dt` = seconds since the previous one. */
   update(sample, dt, now = 0) {
     const axes = axesFromSample(sample);
-    this.lastAxes = axes;
     this.source = sample.quat ? 'quaternion' : 'euler';
     this.live = true;
     this.lastSeen = now;
 
-    if (!this.frame) return null;
+    // World-up in the body frame: the world-z component of each body axis.
+    const up = { x: axes.x.z, y: axes.y.z, z: axes.z.z };
 
-    const fwd = forwardOf(this.frame, axes);
-    let { yaw, pitch } = anglesIn(this.frame, fwd);
+    const m = sample.motion;
+    let yawRaw = 0;
+    let pitchRaw = 0;
+    if (m && (m.rx || m.ry || m.rz)) {
+      this.hasGyro = true;
+      const omega = { x: m.rx || 0, y: m.ry || 0, z: m.rz || 0 };
+      yawRaw = dot(omega, up);
+      pitchRaw = omega.x;
+    }
 
-    // ── Gyro fusion ────────────────────────────────────────────────────────
-    if (sample.motion && this.mode !== 'gyro') {
-      /**
-       * Rotate the aim vector by the gyro, as a real 3D rotation.
-       *
-       * This used to integrate two independent scalars — one for yaw, one for
-       * pitch — which meant two independent signs to get right. Getting either
-       * wrong is not a subtle degradation: with a wrong yaw sign, swinging
-       * straight up and down traces a full circle on screen, because the bad
-       * axis responds in quadrature with the good one. Measured, that is a
-       * loopiness of 0.97 where a straight line is 0.
-       *
-       * A vector rotated by ω is geometrically consistent by construction: a
-       * pure pitch rotation cannot produce yaw no matter what the grip is, and
-       * there is only ONE sign left to determine rather than two.
-       */
-      const { rx = 0, ry = 0, rz = 0 } = sample.motion;
-      // Body-frame rates → world-frame angular velocity, in rad/s.
-      const w = {
-        x: (axes.x.x * rx + axes.y.x * ry + axes.z.x * rz) * DEG,
-        y: (axes.x.y * rx + axes.y.y * ry + axes.z.y * rz) * DEG,
-        z: (axes.x.z * rx + axes.y.z * ry + axes.z.z * rz) * DEG,
-      };
+    // World heading of the most horizontal body axis — the k-learning
+    // reference. Which axis qualifies can change mid-flight (phone rolled to
+    // landscape); skip the sample where it switches rather than compare
+    // headings of two different axes.
+    const useX = Math.abs(axes.x.z) <= Math.abs(axes.z.z);
+    const ax = useX ? axes.x : axes.z;
+    const head = Math.atan2(ax.y, ax.x) / DEG;
 
-      const step = (v, sign) => norm({
-        x: v.x + sign * (w.y * v.z - w.z * v.y) * dt,
-        y: v.y + sign * (w.z * v.x - w.x * v.z) * dt,
-        z: v.z + sign * (w.x * v.y - w.y * v.x) * dt,
-      });
-
-      // One sign, decided by which rotation better predicts the orientation we
-      // actually observed. Both hypotheses face the same orientation lag, so
-      // the lag cancels out and cannot bias the answer. Scores decay, so a
-      // wrong call corrects itself.
-      if (this.prevFwd) {
-        const moved = Math.acos(clamp(dot(this.prevFwd, fwd), -1, 1)) / DEG / dt;
-        if (moved > 12) {
-          const decay = Math.exp(-dt / 3);
-          const ePlus = 1 - dot(step(this.prevFwd, 1), fwd);
-          const eMinus = 1 - dot(step(this.prevFwd, -1), fwd);
-          this.gyroScore.plus = this.gyroScore.plus * decay + ePlus;
-          this.gyroScore.minus = this.gyroScore.minus * decay + eMinus;
-          this.gyroScore.n = this.gyroScore.n * decay + 1;
-          if (this.gyroScore.n > 6) {
-            const { plus, minus } = this.gyroScore;
-            if (Math.abs(plus - minus) > 0.15 * Math.max(plus, minus)) {
-              this.gyroSign = plus < minus ? 1 : -1;
-            }
+    // Learning is evaluated over ~150ms windows, not per sample. Differencing
+    // a noisy orientation at 60Hz amplifies the noise by 60 — 0.15° of jitter
+    // reads as 9°/s of phantom "motion", which once fooled this gate into
+    // dividing real-looking orientation motion by near-zero gyro motion and
+    // slamming k to the clamp. Over a window, real rotation integrates and
+    // noise cancels, so the two are finally distinguishable.
+    if (this.hasGyro && this.prevUsedX === useX && dt > 0 && dt < 0.1) {
+      this.win.g += yawRaw * dt;
+      this.win.t += dt;
+      if (this.win.t >= 0.15) {
+        const o = angleDelta(head, this.win.head0);
+        // ≥ ~5°/s of sustained rotation; sensor jitter stays far below this.
+        if (Math.abs(o) > 0.8) {
+          const decay = Math.exp(-this.win.t / 30);
+          this.kAbsO = this.kAbsO * decay + Math.abs(o);
+          this.kAbsG = this.kAbsG * decay + Math.abs(this.win.g);
+          this.kDot = this.kDot * decay + o * this.win.g;
+          // ≥10° of witnessed motion before overriding the deg/s default.
+          if (this.kAbsO > 10 && this.kAbsG > 1e-9) {
+            this.k = clamp(Math.sign(this.kDot || 1) * (this.kAbsO / this.kAbsG), -80, 80);
+            this.kLearned = true;
           }
         }
+        this.win = { head0: head, g: 0, t: 0 };
       }
-      this.prevFwd = fwd;
-
-      if (this.gyroSign !== 0) {
-        if (!this.fusedFwd) this.fusedFwd = fwd;
-        // Fast: rotate by the gyro. Slow: bleed toward the observed attitude.
-        const rotated = step(this.fusedFwd, this.gyroSign);
-        const k = clamp(dt / this.fusionTau, 0, 1);
-        this.fusedFwd = norm({
-          x: rotated.x + (fwd.x - rotated.x) * k,
-          y: rotated.y + (fwd.y - rotated.y) * k,
-          z: rotated.z + (fwd.z - rotated.z) * k,
-        });
-        ({ yaw, pitch } = anglesIn(this.frame, this.fusedFwd));
-      }
-    }
-
-    this.angles = { yaw, pitch };
-
-    // Fraction of a screen per degree, so games get resolution-independent aim.
-    const perDegX = (1 / this.degPerScreenX) * this.sensitivity * (this.invertX ? -1 : 1);
-    const perDegY = (1 / this.degPerScreenY) * this.sensitivity * (this.invertY ? -1 : 1);
-
-    let tx;
-    let ty;
-
-    if (this.mode === 'hybrid') {
-      /**
-       * Drift correction — no longer the default, and worth understanding why.
-       *
-       * The estimator treats a persistent non-zero mean as sensor drift. That
-       * holds while someone is using the pointer and is badly wrong while they
-       * are holding an aim: it reads the deliberate offset as drift and
-       * subtracts it, so the cursor slides toward the centre of the screen.
-       * Gating it on movement fixed the worst of that, but any correction at
-       * all means the cursor and the phone disagree about where you're
-       * pointing — and disagreeing with the player is exactly what breaks the
-       * illusion of a laser pointer.
-       */
-      const moving = Math.hypot(this.vel.x, this.vel.y) > this.gateLo;
-      const a = moving ? 1 - Math.exp(-dt / this.driftTau) : 0;
-      this.driftYaw += a * (yaw - this.driftYaw);
-      this.driftPitch += a * (pitch - this.driftPitch);
-      const dy = clamp(this.driftYaw, -this.driftLimit, this.driftLimit);
-      const dp = clamp(this.driftPitch, -this.driftLimit, this.driftLimit);
-      tx = 0.5 + (yaw - dy) * perDegX;
-      ty = 0.5 - (pitch - dp) * perDegY;
-    } else if (this.mode === 'absolute') {
-      tx = 0.5 + yaw * perDegX;
-      ty = 0.5 - pitch * perDegY;
-    } else if (this.mode === 'gyro' && sample.motion) {
-      const { rx = 0, ry = 0, rz = 0 } = sample.motion;
-      const omega = { x: rx, y: ry, z: rz };
-      // Angular velocity arrives in the body frame; project onto the
-      // calibrated frame's up (yaw) and right (pitch) axes.
-      const yawRate = dot(omega, {
-        x: dot(axes.x, this.frame.u), y: dot(axes.y, this.frame.u), z: dot(axes.z, this.frame.u),
-      });
-      const pitchRate = dot(omega, {
-        x: dot(axes.x, this.frame.r), y: dot(axes.y, this.frame.r), z: dot(axes.z, this.frame.r),
-      });
-      tx = this.aim.x - yawRate * dt * perDegX;
-      ty = this.aim.y - pitchRate * dt * perDegY;
     } else {
-      if (!this.prev) this.prev = { yaw, pitch };
-      // Near ±90° of pitch the forward vector is almost vertical and yaw stops
-      // meaning anything — freeze horizontal motion rather than let it spin.
-      const dYaw = Math.abs(dot(fwd, this.frame.u)) > 0.985 ? 0 : angleDelta(yaw, this.prev.yaw);
-      const dPitch = angleDelta(pitch, this.prev.pitch);
-      this.prev = { yaw, pitch };
-      tx = this.aim.x + dYaw * perDegX;
-      ty = this.aim.y - dPitch * perDegY;
-      if (this.recenterSpring) {
-        tx += (0.5 - tx) * this.recenterSpring * dt;
-        ty += (0.5 - ty) * this.recenterSpring * dt;
-      }
+      this.win = { head0: head, g: 0, t: 0 };
     }
+    this.prevUsedX = useX;
 
-    this.aim.x = clamp(tx, 0, 1);
-    this.aim.y = clamp(ty, 0, 1);
+    let yawDps = this.k * yawRaw;
+    let pitchDps = this.k * pitchRaw;
+    if (Math.abs(yawDps) < this.deadzoneDps) yawDps = 0;
+    if (Math.abs(pitchDps) < this.deadzoneDps) pitchDps = 0;
+    this.rateDps = { yaw: yawDps, pitch: pitchDps };
 
-    const px = this.position.x;
-    const py = this.position.y;
-    this.position.x = clamp(this.filterX.filter(this.aim.x, dt), 0, 1);
-    this.position.y = clamp(this.filterY.filter(this.aim.y, dt), 0, 1);
-
-    // Velocity for the per-frame extrapolation, lightly smoothed so a single
-    // noisy packet can't fling the prediction.
-    const k = clamp(dt / this.velTau, 0, 1);
-    this.vel.x += ((this.position.x - px) / dt - this.vel.x) * k;
-    this.vel.y += ((this.position.y - py) / dt - this.vel.y) * k;
-
-    this.display.x = this.position.x;
-    this.display.y = this.position.y;
-    return this.position;
+    // Positive yaw = counterclockwise from above = pointing left → cursor
+    // left. Positive pitch about the right edge = pointing up → cursor up.
+    // (Verified numerically in core.test.mjs, not trusted from derivation —
+    // and a device with mirrored conventions flips k, which flips both.)
+    const sx = this.sensitivity * (this.invertX ? -1 : 1);
+    const sy = this.sensitivity * (this.invertY ? -1 : 1);
+    this.rate.x = (-yawDps / this.degPerScreen) * sx;
+    this.rate.y = (-pitchDps / (this.degPerScreen * this.aspect)) * sy;
   }
 
   /**
-   * Where to draw the cursor *this frame*. Call once per render frame, not per
-   * packet — that's the whole point.
+   * Where to draw the cursor this frame. Integrates the current angular rate
+   * at display rate, so motion is continuous regardless of packet rate —
+   * exact integration of a velocity signal, not extrapolation of a position.
    */
   sampleAt(now) {
-    if (!this.live) {
-      this.display.x = this.position.x;
-      this.display.y = this.position.y;
-      return this.display;
-    }
-    // Fade prediction in with real motion. Below the noise floor there is
-    // nothing to predict, so the drawn position is the filtered one exactly.
-    const speed = Math.hypot(this.vel.x, this.vel.y);
-    const gate = clamp((speed - this.gateLo) / Math.max(1e-6, this.gateHi - this.gateLo), 0, 1);
-    if (gate <= 0) {
-      this.display.x = this.position.x;
-      this.display.y = this.position.y;
-      return this.display;
-    }
+    if (!this.lastDraw) this.lastDraw = now;
+    let dt = (now - this.lastDraw) / 1000;
+    this.lastDraw = now;
+    if (!(dt > 0) || dt > 0.25) dt = 0;
 
-    const since = Math.max(0, (now - this.lastSeen) / 1000);
-    const ahead = Math.min((since + this.lead) * gate, this.maxAhead);
-    const dx = clamp(this.vel.x * ahead, -this.maxLeap, this.maxLeap);
-    const dy = clamp(this.vel.y * ahead, -this.maxLeap, this.maxLeap);
-    this.display.x = clamp(this.position.x + dx, 0, 1);
-    this.display.y = clamp(this.position.y + dy, 0, 1);
-    return this.display;
-  }
-
-  /** Drive the pointer from a mouse, for desk testing without a phone. */
-  setFromMouse(nx, ny) {
-    this.aim.x = clamp(nx, 0, 1);
-    this.aim.y = clamp(ny, 0, 1);
-    this.position.x = this.aim.x;
-    this.position.y = this.aim.y;
-    // A mouse is already at zero latency; nothing to predict.
-    this.display.x = this.aim.x;
-    this.display.y = this.aim.y;
-    this.vel.x = 0;
-    this.vel.y = 0;
+    // If packets stop, freeze rather than coast on a stale rate.
+    if (this.live && now - this.lastSeen < 250) {
+      this.pos.x = clamp(this.pos.x + this.rate.x * dt, 0, 1);
+      this.pos.y = clamp(this.pos.y + this.rate.y * dt, 0, 1);
+    }
+    return this.pos;
   }
 }
+
+export const MODES = ['gyro-rate'];

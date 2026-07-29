@@ -1,7 +1,7 @@
 import * as THREE from '/vendor/three/three.module.js';
 import { FruitNinja, FIELD_H } from './logic.js';
 import { Pointer } from '../../core/pointer.js';
-import { Calibration, loadCalibration, fetchBootId, saveSensitivity, loadSensitivity } from '../../core/calibration.js';
+import { saveSensitivity, loadSensitivity } from '../../core/calibration.js';
 import { AudioEngine } from '../../core/audio.js';
 import { GameLink } from '../../core/net.js';
 import { clamp } from '../../core/orientation.js';
@@ -245,34 +245,13 @@ function drawTrail() {
 // ── Audio ──────────────────────────────────────────────────────────────────
 const audio = new AudioEngine();
 
-// ── Pointer + calibration ──────────────────────────────────────────────────
-const pointer = new Pointer({ mode: 'absolute' });
+// ── Pointer ────────────────────────────────────────────────────────────────
+// Rate-based gyro aiming, no calibration flow: the pointer is live from the
+// first packet, and the learned gyro gain lives inside the Pointer itself.
+const pointer = new Pointer({});
 pointer.sensitivity = loadSensitivity() ?? 1;
 let lastSample = null;
 let lastSampleAt = 0;
-
-const calibration = new Calibration({
-  // The flow never runs here; this instance only holds the inherited frame
-  // and services quick re-centres.
-});
-
-/**
- * Inherit the menu's calibration; never run the flow here.
- *
- * Calibration is a once-per-session ritual that belongs to the menu. A channel
- * that re-runs it makes every launch feel like setup rather than play. If none
- * is found (someone deep-linked straight to the game), we start anyway with
- * sensible defaults and let them press B to go back and calibrate properly.
- */
-fetchBootId().then(() => {
-  const saved = loadCalibration();
-  if (saved) {
-    const result = calibration.restore(saved);
-    pointer.setFrame(calibration.frame);
-    if (result) pointer.applyCalibration(result);
-  }
-  startGame();
-});
 
 function resize() {
   const w = Math.max(1, window.innerWidth);
@@ -298,15 +277,10 @@ const link = new GameLink({
     const dt = lastSampleAt ? clamp((now - lastSampleAt) / 1000, 1 / 240, 0.1) : 1 / 60;
     lastSampleAt = now;
     lastSample = sample;
-
-    const frame = calibration.advance(sample, now);
-    if (frame && !pointer.frame) pointer.setFrame(frame);
     pointer.update(sample, dt, now);
-
-
   },
   onCommand: (cmd) => {
-    if (cmd.type === 'calibrate') goToMenu();
+    if (cmd.type === 'calibrate') quickRecentre();
     else if (cmd.type === 'recentre') quickRecentre();
     else if (cmd.type === 'start') beginPlay();
     else if (cmd.type === 'button' && cmd.button === 'A') beginPlay();
@@ -317,8 +291,8 @@ const link = new GameLink({
     const on = controller > 0;
     $('dot').classList.toggle('on', on);
     $('link-t').textContent = on ? 'remote connected' : 'no remote connected';
-    if (on && game.state.phase === 'idle' && !calibration.active) {
-      $('cta').innerHTML = 'Remote linked. Press <strong>Space</strong> to calibrate and play.';
+    if (on && game.state.phase === 'idle') {
+      $('cta').innerHTML = 'Remote linked. Press <strong>Space</strong> to play.';
     }
   },
 });
@@ -368,13 +342,8 @@ function syncHud() {
 }
 
 function quickRecentre() {
-  if (lastSample && calibration.recentre(lastSample)) {
-    pointer.setFrame(calibration.frame);
-    pointer.recentre();
-    flash('re-centred');
-  } else {
-    flash('no sensor data yet');
-  }
+  pointer.recentre();
+  flash('re-centred');
 }
 
 function startGame() {
@@ -388,7 +357,6 @@ function beginPlay() {
   startGame();
 }
 
-/** Recalibration lives in the menu, so send them there rather than duplicating it. */
 function goToMenu() {
   window.location.href = '/';
 }
@@ -438,7 +406,7 @@ function frame(now) {
   // Drive the blade every frame, not every packet. The trail is sampled here
   // too, so its speed window sees display-rate motion rather than packet-rate
   // steps — which is what the slice threshold is tuned against.
-  if (pointer.frame || mouse.active) {
+  if (pointer.live || mouse.active) {
     const aim = pointer.sampleAt(now);
     const p = toWorld(aim.x, aim.y);
     game.setCursor(p.x, p.y, now);
@@ -464,15 +432,8 @@ window.addEventListener('pointerdown', () => audio.unlock());
 window.addEventListener('keydown', (e) => {
   switch (e.key.toLowerCase()) {
     case ' ': e.preventDefault(); if (game.state.phase !== 'playing') beginPlay(); break;
-    case 'r': goToMenu(); break;
+    case 'r':
     case 'c': quickRecentre(); break;
-    case 'm': {
-      const modes = ['absolute', 'hybrid', 'relative', 'gyro'];
-      pointer.mode = modes[(modes.indexOf(pointer.mode) + 1) % modes.length];
-      pointer.recentre();
-      flash(`mapping: ${pointer.mode}`);
-      break;
-    }
     case 'arrowright':
       pointer.sensitivity = clamp(pointer.sensitivity * 1.12, 0.2, 6);
       saveSensitivity(pointer.sensitivity);
@@ -497,9 +458,8 @@ setInterval(() => {
   if (!$('debug').classList.contains('on')) return;
   $('debug').textContent = [
     `mode        ${pointer.mode}`,
-    `grip        ${pointer.frame ? (pointer.frame.axis === 'y' ? 'flat (top edge)' : 'upright (back)') : '—'}`,
-    `yaw/pitch   ${pointer.angles.yaw.toFixed(1)}° / ${pointer.angles.pitch.toFixed(1)}°`,
-    `drift       ${pointer.driftYaw.toFixed(2)}° / ${pointer.driftPitch.toFixed(2)}°`,
+    `gyro gain k ${pointer.k.toFixed(2)} ${pointer.kLearned ? '(learned)' : '(default)'}`,
+    `rate        ${pointer.rateDps.yaw.toFixed(1)} / ${pointer.rateDps.pitch.toFixed(1)} deg/s`,
     `pointer     ${pointer.display.x.toFixed(3)}, ${pointer.display.y.toFixed(3)}`,
     `gesture     ${game.trail.speed().toFixed(2)} u/s`,
     `sensor rate ${link.rate.toFixed(0)} Hz`,
@@ -512,11 +472,15 @@ setInterval(() => {
 
 resize();
 syncHud();
+// Straight into play — no calibration gate. Called here at the bottom of the
+// module: startGame touches const helpers that are in the temporal dead zone
+// until the whole module has evaluated.
+startGame();
 requestAnimationFrame(frame);
 
 // Exposed for the verification harness.
 window.__openwii = {
-  game, pointer, calibration, audio, link, toWorld,
+  game, pointer, audio, link, toWorld,
   scene, camera, renderer, meshes,
   syncScene, drawTrail, pruneMeshes,
   fps: () => fps,

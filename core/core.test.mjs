@@ -1,13 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { bodyAxes, bodyAxesFromQuat, DEG } from './orientation.js';
-import { buildFrame, measureNoise, Calibration } from './calibration.js';
 import { Pointer } from './pointer.js';
 
 /**
- * Regression tests for the four bugs documented in the README, plus the
- * guarantees Phase 0 rests on. Each of these was a real failure that reached a
- * user; none of them announced itself.
+ * Tests for the rate-based pointer.
+ *
+ * Every gyro signal here is computed NUMERICALLY from two consecutive
+ * attitudes — never hand-derived. Hand-picked sign conventions are how the
+ * old design's circle bug happened, and a test that asserts a wrong
+ * convention confidently is worse than no test.
  */
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -22,17 +24,9 @@ const axisQ = (ax, deg) => {
   const s = Math.sin(h);
   return [ax === 0 ? s : 0, ax === 1 ? s : 0, ax === 2 ? s : 0, Math.cos(h)];
 };
-/** Device orientation is Rz(alpha)·Rx(beta)·Ry(gamma). */
 const quatFromEuler = (al, be, ga) => mul(mul(axisQ(2, al), axisQ(0, be)), axisQ(1, ga));
 
-
-/**
- * Body-frame angular velocity between two attitudes, computed numerically.
- *
- * Deriving gyro components by hand means picking sign conventions, and getting
- * one wrong makes a test that asserts the wrong thing confidently. This reads
- * the rotation straight off two consecutive attitudes instead.
- */
+/** Body-frame angular velocity between two attitudes, in deg/s. */
 function omegaBody(a1, a2, h) {
   const col = (a, k) => [a[k].x, a[k].y, a[k].z];
   const R1 = [col(a1, 'x'), col(a1, 'y'), col(a1, 'z')];
@@ -47,18 +41,52 @@ function omegaBody(a1, a2, h) {
   };
 }
 
-function calibratedPointer(alpha, beta, gamma, opts = {}) {
-  const p = new Pointer({ mode: 'relative', ...opts });
-  p.setViewport(1280, 720);
-  p.degPerScreenX = 60;
-  p.degPerScreenY = 40;
-  p.recenterSpring = 0;
-  p.setFrame(buildFrame(bodyAxes(alpha, beta, gamma)));
-  p.recentre();
-  return p;
+/**
+ * Simulate a phone: orientation samples lagged by `lagMs` (the OS fusion
+ * estimate is never fresh), gyro computed from the TRUE motion (the gyro is),
+ * scaled by `unitScale` to model deg/s vs rad/s vs mirrored conventions.
+ */
+function drive(eulerAt, { unitScale = 1, lagMs = 60, secs = 6, pointer = null } = {}) {
+  const p = pointer || new Pointer({});
+  const FRAME = 1000 / 60;
+  const h = 1e-4;
+  const track = [];
+  let ms = 0;
+  for (let i = 0; i < secs * 60; i += 1, ms += FRAME) {
+    const [al, be, ga] = eulerAt(Math.max(0, ms - lagMs) / 1000);
+    const [tAl, tBe, tGa] = eulerAt(ms / 1000);
+    const om = omegaBody(
+      bodyAxes(tAl, tBe, tGa),
+      bodyAxes(...eulerAt((ms + h * 1000) / 1000)),
+      h,
+    );
+    p.update({
+      alpha: al, beta: be, gamma: ga,
+      motion: { rx: om.x * unitScale, ry: om.y * unitScale, rz: om.z * unitScale },
+    }, FRAME / 1000, ms);
+    const d = p.sampleAt(ms);
+    track.push({ ms, x: d.x, y: d.y, al: tAl, be: tBe });
+  }
+  return { p, track };
 }
 
-// ── Orientation decoding ───────────────────────────────────────────────────
+/** Demeaned tracking error of cursor x against true yaw, % of screen. */
+function yawTrackingError(track, degPerScreen, fromMs) {
+  const rows = track.filter((r) => r.ms >= fromMs);
+  const mx = rows.reduce((s, r) => s + r.x, 0) / rows.length;
+  const ma = rows.reduce((s, r) => s + r.al, 0) / rows.length;
+  let sum = 0;
+  for (const r of rows) {
+    // Turning left = alpha increasing = cursor moves left (x decreases).
+    // Demeaning removes the arbitrary offset a rate-based cursor accumulates
+    // while its gain is still being learned.
+    const ideal = -(r.al - ma) / degPerScreen;
+    sum += Math.abs((r.x - mx) - ideal);
+  }
+  return sum / rows.length;
+}
+
+// ── Orientation decoding (unchanged foundation) ────────────────────────────
 test('quaternion decoding matches Euler decoding exactly', () => {
   const cases = [
     [0, 0, 0], [37, 0, 0], [0, 52, 0], [0, 0, -41], [120, -33, 67],
@@ -75,433 +103,124 @@ test('quaternion decoding matches Euler decoding exactly', () => {
   assert.ok(worst < 1e-9, `worst component error ${worst.toExponential(2)}`);
 });
 
-// ── Grip detection ─────────────────────────────────────────────────────────
-test('a flat grip resolves to the top edge', () => {
-  assert.equal(buildFrame(bodyAxes(0, 0, 0)).axis, 'y');
+// ── The core behaviour: the cursor is the gyro ─────────────────────────────
+test('a deg/s phone tracks a horizontal sweep, correct direction and scale', () => {
+  const { track } = drive((t) => [10 * Math.sin(2 * Math.PI * t), 0, 0]);
+  const err = yawTrackingError(track, 30, 2000);
+  assert.ok(err < 0.05, `demeaned tracking error ${(err * 100).toFixed(1)}% of screen`);
 });
 
-test('an upright grip resolves to the back of the phone', () => {
-  // Phone held vertical like a TV remote: the top edge points at the ceiling,
-  // which is the gimbal singularity that used to freeze horizontal aiming.
-  assert.equal(buildFrame(bodyAxes(0, 90, 0)).axis, 'z');
+test('a rad/s phone (57× smaller readings) is learned and then tracks', () => {
+  // Firefox has reported rotationRate in rad/s. Untreated, the cursor moves
+  // 57× too slowly — which reads as "the cursor is really slow".
+  const { p, track } = drive(
+    (t) => [12 * Math.sin(2 * Math.PI * t), 0, 0],
+    { unitScale: 1 / 57.29578, secs: 8 },
+  );
+  assert.ok(Math.abs(p.k - 57.29578) / 57.29578 < 0.1, `k learned ≈57.3 (got ${p.k.toFixed(1)})`);
+  const err = yawTrackingError(track, 30, 4000);
+  assert.ok(err < 0.06, `tracking error after learning ${(err * 100).toFixed(1)}%`);
 });
 
-test('an upright grip can still aim horizontally', () => {
-  const p = calibratedPointer(0, 90, 0);
-  const xs = [];
-  p.update({ alpha: 0, beta: 90, gamma: 0 }, 1 / 60);
-  for (let i = 0; i <= 120; i += 1) {
-    p.update({ alpha: -22 * Math.sin(i / 12), beta: 90, gamma: 0 }, 1 / 60);
-    xs.push(p.aim.x);
-  }
-  const travel = Math.max(...xs) - Math.min(...xs);
-  assert.ok(travel > 0.5, `swept ${(travel * 100).toFixed(0)}% of the screen`);
+test('a mirrored-convention phone is learned and tracks the right way', () => {
+  const { p, track } = drive(
+    (t) => [12 * Math.sin(2 * Math.PI * t), 0, 0],
+    { unitScale: -1, secs: 8 },
+  );
+  assert.ok(p.k < -0.8, `k learned negative (got ${p.k.toFixed(2)})`);
+  const err = yawTrackingError(track, 30, 4000);
+  assert.ok(err < 0.06, `tracking error ${(err * 100).toFixed(1)}%`);
 });
 
-// ── Mapping fidelity ───────────────────────────────────────────────────────
-test('relative mode moves the full amount, not a filtered fraction', () => {
-  // Integrating deltas onto the *filtered* cursor collapses to
-  // pos += alpha*delta, scaling every movement to ~14% at rest.
-  const p = calibratedPointer(0, 0, 0);
-  p.update({ alpha: 0, beta: 0, gamma: 0 }, 1 / 60);
-  const x0 = p.aim.x;
-  for (let i = 1; i <= 20; i += 1) p.update({ alpha: -i, beta: 0, gamma: 0 }, 1 / 60);
-  const expected = 20 / 60;                 // 20° across a 60° screen
-  const actual = p.aim.x - x0;
-  assert.ok(Math.abs(actual / expected - 1) < 0.02, `ratio ${(actual / expected).toFixed(3)}`);
+test('orientation lag does not slow the cursor', () => {
+  // The rate path never waits on the orientation estimate, so even an absurd
+  // 200ms of OS fusion lag must not degrade tracking. This is the property
+  // the previous absolute-pointing design could not have.
+  const { track } = drive(
+    (t) => [10 * Math.sin(2 * Math.PI * t), 0, 0],
+    { lagMs: 200 },
+  );
+  const err = yawTrackingError(track, 30, 2500);
+  assert.ok(err < 0.05, `error with 200ms orientation lag ${(err * 100).toFixed(1)}%`);
 });
 
-test('rolling the wrist does not move the aim', () => {
-  const p = calibratedPointer(0, 0, 0);
-  p.update({ alpha: 0, beta: 0, gamma: 0 }, 1 / 60);
-  const before = { x: p.aim.x, y: p.aim.y };
-  for (let g = 0; g <= 80; g += 4) p.update({ alpha: 0, beta: 0, gamma: g }, 1 / 60);
-  const moved = Math.hypot(p.aim.x - before.x, p.aim.y - before.y);
-  assert.ok(moved < 0.01, `moved ${(moved * 100).toFixed(2)}% of the screen`);
-});
-
-test('yaw freezes near the pitch singularity instead of spinning', () => {
-  const p = calibratedPointer(0, 0, 0);
-  let prev = p.aim.x;
-  let worst = 0;
-  for (let i = 0; i < 40; i += 1) {
-    p.update({ alpha: (i * 37) % 360, beta: 89.7, gamma: 0 }, 1 / 60);
-    worst = Math.max(worst, Math.abs(p.aim.x - prev));
-    prev = p.aim.x;
-  }
-  assert.ok(worst < 0.02, `worst single-frame jump ${(worst * 100).toFixed(2)}% of screen`);
-});
-
-test('both sample representations drive the pointer identically', () => {
-  const results = [];
-  for (const useQuat of [false, true]) {
-    const p = calibratedPointer(0, 0, 0);
-    const send = (al, be, ga) => p.update(
-      useQuat ? { quat: quatFromEuler(al, be, ga) } : { alpha: al, beta: be, gamma: ga },
-      1 / 60,
-    );
-    send(0, 0, 0);
-    for (let i = 0; i <= 120; i += 1) send(-20 * Math.sin(i / 12), 10 * Math.sin(i / 9), 0);
-    results.push({ x: p.aim.x, y: p.aim.y });
-  }
-  assert.ok(Math.abs(results[0].x - results[1].x) < 1e-6, 'x matches');
-  assert.ok(Math.abs(results[0].y - results[1].y) < 1e-6, 'y matches');
-});
-
-// ── Responsiveness ─────────────────────────────────────────────────────────
-test('the cursor keeps up with a moving hand', () => {
-  // The symptom of over-smoothing is tracking error: how far behind the true
-  // aim the cursor sits mid-sweep. With the old constants this reached 25% of
-  // the screen — a quarter of the display behind your hand, which reads as
-  // both "slow" and "imprecise", since the lag makes you overshoot.
-  //
-  // A step-response test would NOT catch this: One Euro initialises to its
-  // first sample, so a fresh filter appears to settle instantly.
-  const p = calibratedPointer(0, 0, 0, { mode: 'absolute' });
-  p.mode = 'absolute';
-  p.recentre();
-  let worst = 0;
-  for (let f = 0; f < 60; f += 1) {
-    const yaw = -25 * Math.sin((f / 60) * Math.PI * 2);   // one sweep per second
-    p.update({ alpha: yaw, beta: 0, gamma: 0 }, 1 / 60);
-    worst = Math.max(worst, Math.abs(p.position.x - (0.5 + -yaw / 60)));
-  }
-  assert.ok(worst < 0.08, `worst tracking error ${(worst * 100).toFixed(1)}% of screen`);
-});
-
-/**
- * Full pipeline: a 60Hz sensor, a 20ms delivery delay, and a 60Hz display.
- * Error is measured between the pixel drawn *this frame* and where the hand
- * actually is at that instant — which is what a player perceives, and what the
- * O2 packet-latency gate cannot see.
- */
-function trackingError({ predict = true, hz = 1, amp = 25, delayMs = 20, secs = 3 } = {}) {
-  const FRAME_MS = 1000 / 60;
-  const SENSOR_MS = 1000 / 60;
-  const DPS = 60;
-  const p = calibratedPointer(0, 0, 0, { mode: 'absolute' });
-  p.mode = 'absolute';
-  p.degPerScreenX = DPS;
-  if (!predict) { p.lead = 0; p.maxAhead = 0; p.maxLeap = 0; }
-  p.recentre();
-
-  const truth = (ms) => -amp * Math.sin((2 * Math.PI * hz * ms) / 1000);
-  let nextSensor = 0;
-  let lastSend = 0;
-  let sum = 0;
-  let n = 0;
-  for (let ms = 0; ms <= secs * 1000; ms += FRAME_MS) {
-    while (nextSensor + delayMs <= ms) {
-      const dt = lastSend ? (nextSensor - lastSend) / 1000 : 1 / 60;
-      lastSend = nextSensor;
-      p.update({ alpha: truth(nextSensor), beta: 0, gamma: 0 }, dt, ms);
-      nextSensor += SENSOR_MS;
-    }
-    if (ms < 400) continue;                       // let it settle
-    sum += Math.abs(p.sampleAt(ms).x - (0.5 + -truth(ms) / DPS));
-    n += 1;
-  }
-  return sum / n;
-}
-
-test('the drawn cursor stays close to where the hand actually is', () => {
-  const err = trackingError({ hz: 1 });
-  assert.ok(err < 0.04, `mean tracking error ${(err * 100).toFixed(1)}% of screen`);
-});
-
-test('per-frame prediction beats drawing the last packet', () => {
-  const withPrediction = trackingError({ predict: true });
-  const without = trackingError({ predict: false });
-  assert.ok(withPrediction < without * 0.7,
-    `${(without * 100).toFixed(1)}% → ${(withPrediction * 100).toFixed(1)}%`);
-});
-
-test('prediction does not fling the cursor when the hand stops', () => {
-  // Overshoot at a hard stop is the failure mode of extrapolation, and it
-  // reads as imprecision. Cap it.
-  const FRAME_MS = 1000 / 60;
-  const DPS = 60;
-  const amp = 25;
-  const p = calibratedPointer(0, 0, 0, { mode: 'absolute' });
-  p.mode = 'absolute';
-  p.degPerScreenX = DPS;
-  p.recentre();
-  const truth = (ms) => (ms < 250 ? -amp * (ms / 250) : -amp);
-  const target = 0.5 + amp / DPS;
-  let s = 0;
-  let last = 0;
-  let peak = 0;
-  for (let ms = 0; ms <= 1500; ms += FRAME_MS) {
-    while (s + 20 <= ms) {
-      const dt = last ? (s - last) / 1000 : 1 / 60;
-      last = s;
-      p.update({ alpha: truth(s), beta: 0, gamma: 0 }, dt, ms);
-      s += 1000 / 60;
-    }
-    if (ms > 250) peak = Math.max(peak, p.sampleAt(ms).x - target);
-  }
-  assert.ok(peak < 0.06, `overshoot ${(peak * 100).toFixed(1)}% of screen`);
-});
-
-/**
- * The phone as it really behaves: `deviceorientation` is the OS's *fused*
- * attitude estimate and lags reality; `rotationRate` is the raw gyro and does
- * not. Every earlier simulation here fed the pointer a perfect orientation
- * signal, which hid the single largest source of felt latency.
- */
-function laggedPhone({ mode = 'absolute', gyro = true, fuseLagMs, hz = 1, amp = 20, secs = 6 }) {
-  const DPS = 45;
-  const FRAME = 1000 / 60;
-  const WIRE = 15;
-  const p = new Pointer({ mode });
-  p.mode = mode;
-  p.degPerScreenX = DPS;
-  p.degPerScreenY = DPS;
-  p.recenterSpring = 0;
-  p.setFrame(buildFrame(bodyAxes(0, 0, 0)));
-  p.recentre();
-
-  const alphaAt = (ms) => -amp * Math.sin((2 * Math.PI * hz * ms) / 1000);
-  const rzAt = (ms) => -amp * 2 * Math.PI * hz * Math.cos((2 * Math.PI * hz * ms) / 1000);
-
-  let s = 0;
-  let last = 0;
-  let sum = 0;
-  let n = 0;
-  for (let ms = 0; ms <= secs * 1000; ms += FRAME) {
-    while (s + WIRE <= ms) {
-      const dt = last ? (s - last) / 1000 : 1 / 60;
-      last = s;
-      const sample = { alpha: alphaAt(s - fuseLagMs), beta: 0, gamma: 0 };
-      if (gyro) sample.motion = { rx: 0, ry: 0, rz: rzAt(s) };
-      p.update(sample, dt, ms);
-      s += 1000 / 60;
-    }
-    if (ms < 2000) continue;                  // sign detection + fusion settle
-    sum += Math.abs(p.sampleAt(ms).x - (0.5 + -alphaAt(ms) / DPS));
-    n += 1;
-  }
-  return { err: sum / n, sign: p.gyroSign };
-}
-
-test('gyro fusion recovers the OS fusion latency', () => {
-  // deviceorientation lag is inherent to the platform and cannot be filtered
-  // away downstream. Integrating the raw gyro and correcting slowly toward
-  // orientation is the only way to get it back.
-  const fused = laggedPhone({ gyro: true, fuseLagMs: 60 });
-  const orientationOnly = laggedPhone({ gyro: false, fuseLagMs: 60 });
-  assert.ok(fused.err < orientationOnly.err * 0.5,
-    `${(orientationOnly.err * 100).toFixed(1)}% → ${(fused.err * 100).toFixed(1)}%`);
-});
-
-test('the gyro sign is found correctly under either platform convention', () => {
-  // rotationRate sign conventions differ between platforms, so the detector has
-  // to work both ways round.
-  const detect = (convention) => {
-    const p = new Pointer({});
-    p.degPerScreenX = 36;
-    p.recenterSpring = 0;
-    p.setFrame(buildFrame(bodyAxes(0, 0, 0)));
-    p.recentre();
-    const amp = 20;
-    const h = 1e-4;
-    const att = (ms) => bodyAxes(-amp * Math.sin((2 * Math.PI * ms) / 1000), 0, 0);
-    let ms = 0;
-    for (let i = 0; i < 60 * 8; i += 1, ms += 1000 / 60) {
-      const om = omegaBody(att(ms), att(ms + h * 1000), h);
-      p.update({
-        alpha: -amp * Math.sin((2 * Math.PI * (ms - 60)) / 1000), beta: 0, gamma: 0,
-        motion: { rx: om.x * convention, ry: om.y * convention, rz: om.z * convention },
-      }, 1 / 60, ms);
-    }
-    return p.gyroSign;
-  };
-  const a = detect(1);
-  const b = detect(-1);
-  assert.notEqual(a, 0, 'a sign was determined');
-  assert.equal(b, -a, 'the opposite convention yields the opposite sign');
-});
-
-test('a pure vertical swing produces no horizontal motion', () => {
-  // Scalar per-axis integration had two independent signs, and a wrong yaw sign
-  // made a straight up-down swing trace a full circle — the bad axis responding
-  // in quadrature with the good one, measured at 0.97 loopiness where a line is
-  // 0. Rotating the aim vector by omega is geometrically consistent instead:
-  // pitch cannot leak into yaw whatever the grip or the sign.
-  const sweep = (rollDeg) => {
-    const p = new Pointer({});
-    p.degPerScreenX = 30;
-    p.degPerScreenY = 22;
-    p.recenterSpring = 0;
-    p.setFrame(buildFrame(bodyAxes(0, 0, rollDeg)));
-    p.recentre();
-    const A = 18;
-    const w = 2 * Math.PI * 0.8;
-    const h = 1e-4;
-    const att = (ms) => bodyAxes(0, A * Math.sin((w * ms) / 1000), rollDeg);
-    const xs = [];
-    let ms = 0;
-    for (let i = 0; i < 60 * 6; i += 1, ms += 1000 / 60) {
-      const om = omegaBody(att(ms), att(ms + h * 1000), h);
-      p.update({
-        alpha: 0, beta: A * Math.sin((w * ms) / 1000), gamma: rollDeg,
-        motion: { rx: om.x, ry: om.y, rz: om.z },
-      }, 1 / 60, ms);
-      if (ms > 2500) xs.push(p.sampleAt(ms).x);
-    }
-    return Math.max(...xs) - Math.min(...xs);
-  };
+test('a vertical swing produces no horizontal motion, at any grip roll', () => {
+  // The old design once turned a straight up-down swing into a full circle.
   for (const roll of [0, 25, 40]) {
-    const drift = sweep(roll);
-    assert.ok(drift < 0.02, `roll ${roll}°: drifted ${(drift * 100).toFixed(1)}% horizontally`);
+    const { track } = drive((t) => [0, 18 * Math.sin(2 * Math.PI * 0.8 * t), roll]);
+    const xs = track.filter((r) => r.ms > 1500).map((r) => r.x);
+    const ys = track.filter((r) => r.ms > 1500).map((r) => r.y);
+    const xTravel = Math.max(...xs) - Math.min(...xs);
+    const yTravel = Math.max(...ys) - Math.min(...ys);
+    assert.ok(xTravel < 0.02, `roll ${roll}°: ${(xTravel * 100).toFixed(1)}% horizontal drift`);
+    assert.ok(yTravel > 0.3, `roll ${roll}°: vertical actually moves (${(yTravel * 100).toFixed(0)}%)`);
   }
 });
 
-test('the gyro sign is discovered from the data, not assumed', () => {
-  // rotationRate sign conventions differ between platforms. Getting it wrong
-  // makes the fast and slow paths fight, which is worse than no fusion at all.
-  const { sign } = laggedPhone({ fuseLagMs: 30 });
-  assert.notEqual(sign, 0, 'a sign was determined');
-  const err = laggedPhone({ fuseLagMs: 30 }).err;
-  assert.ok(err < 0.04, `and it is the right one — error ${(err * 100).toFixed(1)}%`);
+test('upright TV-remote grip aims exactly like the flat grip', () => {
+  // Grip-agnostic by construction: yaw is rotation about world-up either way.
+  const { track } = drive((t) => [10 * Math.sin(2 * Math.PI * t), 80, 0]);
+  const err = yawTrackingError(track, 30, 2000);
+  assert.ok(err < 0.05, `upright-grip tracking error ${(err * 100).toFixed(1)}%`);
 });
 
-/** Cursor travel while the hand is still and only the sensor is noisy. */
-function restingWobble({ noiseDeg, dps, gated = true }) {
-  const p = calibratedPointer(0, 0, 0, { mode: 'absolute' });
-  p.mode = 'absolute';
-  p.degPerScreenX = dps;
-  if (gated) p.setNoiseFloor(noiseDeg);
-  else { p.gateLo = 0; p.gateHi = 1e-6; }
-  p.recentre();
+test('the cursor is rock-still at rest', () => {
+  // Tremor-level gyro noise and orientation jitter must not random-walk the
+  // cursor. The deadzone handles this with zero cost to real motion.
   let seed = 7;
   const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff) - 0.5;
-  let min = 1;
-  let max = 0;
-  let s = 0;
-  for (let ms = 0; ms <= 3000; ms += 1000 / 60) {
-    while (s + 20 <= ms) {
-      p.update({ alpha: rnd() * noiseDeg, beta: 0, gamma: 0 }, 1 / 60, ms);
-      s += 1000 / 60;
-    }
-    if (ms < 500) continue;
-    const x = p.sampleAt(ms).x;
-    min = Math.min(min, x);
-    max = Math.max(max, x);
-  }
-  return max - min;
-}
-
-test('prediction does not amplify jitter while the hand is still', () => {
-  // Extrapolating a velocity that is pure sensor noise moves the cursor for no
-  // reason. Measured, this made resting jitter ~1.5x worse than not predicting
-  // at all — so prediction fades in only above the measured noise floor.
-  const gated = restingWobble({ noiseDeg: 1.0, dps: 45, gated: true });
-  const ungated = restingWobble({ noiseDeg: 1.0, dps: 45, gated: false });
-  assert.ok(gated < ungated * 0.75, `${(ungated * 100).toFixed(2)}% → ${(gated * 100).toFixed(2)}%`);
-});
-
-test('a shaky hand still gets a steady cursor', () => {
-  const w = restingWobble({ noiseDeg: 1.5, dps: 45 });
-  assert.ok(w < 0.03, `resting wobble ${(w * 100).toFixed(2)}% of screen`);
-});
-
-test('the swing step waits for both directions on both axes', () => {
-  // It used to end on total span, so sweeping left-right and then merely
-  // *upward* satisfied it — calibration closed before you could come back down
-  // and the downward half of your range was never measured.
-  const cal = new Calibration();
-  let ms = 0;
-  cal.start(ms);
-  const feed = (alpha, beta) => { ms += 16; cal.advance({ alpha, beta, gamma: 0 }, ms); };
-
-  for (let i = 0; i < 120; i += 1) feed(0, 0);            // hold still
-  assert.equal(cal.step, 'range', 'reached the swing step');
-
-  // Full horizontal sweep, then upward only — and pause there.
-  for (let i = 0; i < 90; i += 1) feed(-25 * Math.sin(i / 14), 0);
-  for (let i = 0; i < 60; i += 1) feed(0, 18 * (i / 60));
-  for (let i = 0; i < 90; i += 1) feed(0, 18);            // held at the top
-  assert.equal(cal.done, false, 'still waiting for the downward half');
-
-  // Now come back down through neutral.
-  for (let i = 0; i < 60; i += 1) feed(0, 18 - 36 * (i / 60));
-  for (let i = 0; i < 90; i += 1) feed(0, -18);
-  assert.equal(cal.done, true, 'completes once both directions are seen');
-  assert.ok(cal.range.pitchMin < -7 && cal.range.pitchMax > 7, 'measured both ways');
-});
-
-test('calibration measures the hand’s noise floor', () => {
-  const still = [];
-  const shaky = [];
-  for (let i = 0; i < 40; i += 1) {
-    still.push({ t: i * 20, ...pick(bodyAxes(0.05 * ((i % 3) - 1), 0, 0)) });
-    shaky.push({ t: i * 20, ...pick(bodyAxes(1.2 * ((i % 3) - 1), 0, 0)) });
-  }
-  const current = bodyAxes(0, 0, 0);
-  const a = measureNoise(still, current);
-  const b = measureNoise(shaky, current);
-  assert.ok(a < 0.2, `steady hand reads ${a.toFixed(2)}°`);
-  assert.ok(b > 0.8, `shaky hand reads ${b.toFixed(2)}°`);
-  assert.ok(b > a * 4, 'the two are clearly distinguished');
-});
-
-function pick(axes) {
-  return { y: axes.y, z: axes.z };
-}
-
-test('the smoothing filter actually opens up with speed', () => {
-  // `cutoff = minCutoff + beta*|speed|` makes beta unit-dependent. When the
-  // pointer moved from pixels to normalised units, beta kept its pixel-era
-  // value and the adaptive term collapsed to nothing — leaving a fixed low-pass
-  // that lagged at every speed. This pins the adaptation to real units.
   const p = new Pointer({});
-  const slow = p.filterX.minCutoff + p.filterX.beta * 0.1;   // 0.1 screens/sec
-  const fast = p.filterX.minCutoff + p.filterX.beta * 3;     // 3 screens/sec
-  assert.ok(fast > slow * 3, `cutoff opens ${slow.toFixed(1)}Hz → ${fast.toFixed(1)}Hz`);
-});
-
-// ── Drift correction ───────────────────────────────────────────────────────
-test('a held aim stays exactly where it is pointed', () => {
-  // The drift estimator assumes a persistent non-zero mean is sensor error.
-  // While someone is *holding* an aim that is precisely wrong: it read the
-  // deliberate offset as drift and dragged the cursor toward centre — measured
-  // at 28% of screen width over a minute, which is the cursor visibly refusing
-  // to stay put. It now only learns while the pointer is moving.
-  const p = calibratedPointer(0, 0, 0, { mode: 'absolute' });
-  p.mode = 'absolute';
-  p.recentre();
-  let first = null;
-  for (let i = 0, ms = 0; i <= 60 * 60; i += 1, ms += 1000 / 60) {
-    p.update({ alpha: 15, beta: 0, gamma: 0, motion: { rx: 0, ry: 0, rz: 0 } }, 1 / 60, ms);
-    if (i === 60) first = p.sampleAt(ms).x;
+  let ms = 0;
+  const xs = [];
+  for (let i = 0; i < 60 * 5; i += 1, ms += 1000 / 60) {
+    p.update({
+      alpha: rnd() * 0.3, beta: rnd() * 0.3, gamma: 0,
+      motion: { rx: rnd() * 0.2, ry: rnd() * 0.2, rz: rnd() * 0.2 },
+    }, 1 / 60, ms);
+    xs.push(p.sampleAt(ms).x);
   }
-  const last = p.sampleAt(60 * 1000).x;
-  assert.ok(Math.abs(last - first) < 0.01,
-    `slid ${(Math.abs(last - first) * 100).toFixed(1)}% of screen over a minute`);
+  const travel = Math.max(...xs) - Math.min(...xs);
+  assert.ok(travel < 0.005, `rest wobble ${(travel * 100).toFixed(2)}% of screen`);
 });
 
-test('drift is still absorbed while the pointer is in use', () => {
-  // The trade for the test above: drift is learned only during movement. That
-  // is the right way round — nobody holds a pointer motionless for minutes, and
-  // if drift does move the cursor you correct it by moving, which re-enables
-  // learning. Here the player waves around while the sensor wanders.
-  const run = (mode) => {
-    const p = calibratedPointer(0, 0, 0, { mode });
-    p.mode = mode;
-    p.recentre();
-    const steps = 5 * 60 * 60;
-    let ms = 0;
-    for (let i = 0; i < steps; i += 1, ms += 1000 / 60) {
-      const bias = (i / (60 * 60)) * 2;                    // 2°/min of wander
-      const wave = 12 * Math.sin((2 * Math.PI * 0.5 * i) / 60);   // normal use
-      p.update({ alpha: -bias + wave, beta: 0, gamma: 0 }, 1 / 60, ms);
-    }
-    // Compare at a moment the wave passes through zero, so only bias remains.
-    return { p, err: Math.abs(p.driftYaw) };
-  };
-  const hybrid = run('hybrid');
-  const absolute = run('absolute');
-  assert.ok(hybrid.err > 1, `hybrid learned the ${hybrid.err.toFixed(1)}° bias`);
-  assert.equal(absolute.p.driftYaw, 0, 'absolute mode learns nothing, by design');
+test('stillness never corrupts the learned gain', () => {
+  const { p } = drive((t) => [12 * Math.sin(2 * Math.PI * t), 0, 0], { secs: 4 });
+  const learned = p.k;
+  // Now hold still for a long time with noise only.
+  let seed = 11;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff) - 0.5;
+  let ms = 100000;
+  for (let i = 0; i < 60 * 30; i += 1, ms += 1000 / 60) {
+    p.update({
+      alpha: rnd() * 0.3, beta: 0, gamma: 0,
+      motion: { rx: 0, ry: 0, rz: rnd() * 0.1 },
+    }, 1 / 60, ms);
+  }
+  assert.ok(Math.abs(p.k - learned) < 0.05 * Math.abs(learned),
+    `k held (${learned.toFixed(2)} → ${p.k.toFixed(2)})`);
+});
+
+test('recentre snaps to the middle and stays', () => {
+  const { p } = drive((t) => [15 * Math.sin(2 * Math.PI * t), 0, 0], { secs: 2 });
+  p.recentre();
+  assert.equal(p.pos.x, 0.5);
+  assert.equal(p.pos.y, 0.5);
+  const after = p.sampleAt(999999);
+  assert.equal(after.x, 0.5, 'no coasting after recentre');
+});
+
+test('when packets stop, the cursor freezes instead of coasting', () => {
+  const p = new Pointer({});
+  let ms = 0;
+  // Constant leftward turn.
+  for (let i = 0; i < 60; i += 1, ms += 1000 / 60) {
+    p.update({ alpha: i, beta: 0, gamma: 0, motion: { rx: 0, ry: 0, rz: 60 } }, 1 / 60, ms);
+    p.sampleAt(ms);
+  }
+  const atStop = p.sampleAt(ms);
+  const frozen = { x: atStop.x, y: atStop.y };
+  // One second with no packets.
+  const later = p.sampleAt(ms + 1000);
+  assert.ok(Math.abs(later.x - frozen.x) < 0.02,
+    `coasted ${(Math.abs(later.x - frozen.x) * 100).toFixed(1)}% after packets stopped`);
 });

@@ -1,6 +1,6 @@
 import * as THREE from '/vendor/three/three.module.js';
 import { Pointer } from '/core/pointer.js';
-import { Calibration, loadCalibration, fetchBootId, saveSensitivity, loadSensitivity } from '/core/calibration.js';
+import { saveSensitivity, loadSensitivity } from '/core/calibration.js';
 import { AudioEngine } from '/core/audio.js';
 import { GameLink } from '/core/net.js';
 import { clamp } from '/core/orientation.js';
@@ -377,48 +377,16 @@ scene.add(hand);
 
 // ── State ──────────────────────────────────────────────────────────────────
 const audio = new AudioEngine();
-const pointer = new Pointer({ mode: 'absolute' });
-// Pointer speed is a remembered preference, not something calibration derives.
+const pointer = new Pointer({});
+// Pointer speed is a preference, remembered across pages and restarts.
 pointer.sensitivity = loadSensitivity() ?? 1;
 let lastSample = null;
 let lastSampleAt = 0;
 let hovered = null;         // tile | arrow | 'wii' | null
 let launching = null;       // { tile, t } during zoom-to-fill
 
-const calibration = new Calibration({
-  onStep: (step) => {
-    link.feedback({ type: 'calibration', step, active: calibration.active });
-    $('cal').classList.toggle('hide', !calibration.active);
-    if (calibration.active) {
-      const copy = {
-        signal: ['Waiting for the remote', 'Open the controller page on your phone and tap Enable motion sensors.'],
-        steady: ['Hold still', 'Grip the phone however feels natural, point it at this screen, and keep it as steady as you can — this is measuring how much your hand shakes.'],
-        range: ['Swing it around', 'Sweep fully left and right, then all the way up and down. Take your time — it ends when you stop.'],
-      }[step];
-      if (copy) { $('cal-title').textContent = copy[0]; $('cal-body').textContent = copy[1]; }
-    }
-  },
-  onDone: (result) => {
-    pointer.applyCalibration(result);
-    pointer.setFrame(calibration.frame);
-    pointer.recentre();
-    $('cal').classList.add('hide');
-    audio.play('pointer-connect');
-  },
-});
-
-// Inherit this server run's calibration if one exists. Only the menu ever runs
-// the flow; games inherit it, so calibration happens once per `npm start`.
-let calibrationReady = false;
-fetchBootId().then(() => {
-  const saved = loadCalibration();
-  if (saved) {
-    const result = calibration.restore(saved);
-    pointer.setFrame(calibration.frame);
-    if (result) pointer.applyCalibration(result);
-  }
-  calibrationReady = true;
-});
+// No calibration flow. Rate-based aiming is grip-agnostic and unit/sign
+// auto-gaining, so the pointer is live from the first packet: pair and play.
 
 const link = new GameLink({
   onOrientation: (sample) => {
@@ -426,21 +394,12 @@ const link = new GameLink({
     const dt = lastSampleAt ? clamp((now - lastSampleAt) / 1000, 1 / 240, 0.1) : 1 / 60;
     lastSampleAt = now;
     lastSample = sample;
-    // Start calibration on the first real sample, not on presence. A phone can
-    // sit connected with sensors disabled indefinitely, and gating on presence
-    // parks the menu behind a "hold still" prompt that can never be satisfied.
-    // `calibrationReady` waits for the boot-id lookup so we don't kick off a
-    // redundant calibration a beat before discovering a saved one.
-    if (calibrationReady && !calibration.done && !calibration.active) calibration.start(now);
-    const frame = calibration.advance(sample, now);
-    if (frame && !pointer.frame) pointer.setFrame(frame);
     pointer.update(sample, dt, now);
   },
   onCommand: (cmd) => {
     if (cmd.type === 'button' && cmd.button === 'A') pressA();
     else if (cmd.type === 'button' && cmd.button === 'B') pressB();
-    else if (cmd.type === 'calibrate') startCalibration();
-    else if (cmd.type === 'recentre') quickRecentre();
+    else if (cmd.type === 'calibrate' || cmd.type === 'recentre') quickRecentre();
   },
   onPresence: ({ controller }) => {
     const on = controller > 0;
@@ -475,24 +434,15 @@ function showSpeed() {
   $('speed').classList.add('on');
 }
 
-function startCalibration() {
-  ensureAudio();
-  calibration.start(performance.now());
-}
-
 function quickRecentre() {
   ensureAudio();
-  if (lastSample && calibration.recentre(lastSample)) {
-    pointer.setFrame(calibration.frame);
-    pointer.recentre();
-    audio.play('select');
-  }
+  pointer.recentre();
+  audio.play('select');
 }
 
 // ── Interaction ────────────────────────────────────────────────────────────
 function pressA() {
   ensureAudio();
-  if (calibration.active) return;
   if (launching) return;
 
   if (hovered === 'wii') { audio.play('select'); return; }
@@ -614,7 +564,7 @@ function step(now, dt) {
   hand.position.set(p.x + 0.3 * L.scale, p.y - 0.44 * L.scale, 3);
   hand.visible = !launching;
 
-  if (!calibration.active && !launching) setHover(hitTest(p.x, p.y));
+  if (!launching) setHover(hitTest(p.x, p.y));
   else if (launching) setHover(null);
 
   // Idle wobble + hover response.
@@ -691,7 +641,7 @@ window.addEventListener('keydown', (e) => {
     pointer.sensitivity = clamp(pointer.sensitivity * step, 0.2, 6);
     saveSensitivity(pointer.sensitivity);
     showSpeed();
-  } else if (e.key.toLowerCase() === 'r') startCalibration();
+  } else if (e.key.toLowerCase() === 'r') quickRecentre();
   else if (e.key.toLowerCase() === 'c') quickRecentre();
   else if (e.key.toLowerCase() === 'd') $('debug').classList.toggle('on');
 });
@@ -714,12 +664,10 @@ setInterval(() => {
     `fps         ${fps.toFixed(0)}`,
     `pointer     ${pointer.display.x.toFixed(3)}, ${pointer.display.y.toFixed(3)}`,
     `lead        ${(pointer.lead*1000).toFixed(0)}ms  vel ${Math.hypot(pointer.vel.x, pointer.vel.y).toFixed(2)}/s`,
-    `hand noise  ${pointer.noiseDeg.toFixed(2)}deg  gate ${pointer.gateLo.toFixed(2)}`,
-    `gyro fusion ${pointer.gyroSign ? 'on (sign ' + pointer.gyroSign + ')' : 'learning…'}`,
-    `drift corr  ${pointer.mode === 'hybrid' ? pointer.driftYaw.toFixed(2) + 'deg' : 'off (absolute)'}`,
-    `deg/screen  ${pointer.degPerScreenX.toFixed(0)} x ${pointer.degPerScreenY.toFixed(0)}  cutoff ${pointer.filterX.minCutoff.toFixed(1)}Hz`,
+    `gyro gain k ${pointer.k.toFixed(2)} ${pointer.kLearned ? '(learned)' : '(default)'}`,
+    `rate        ${pointer.rateDps.yaw.toFixed(1)} / ${pointer.rateDps.pitch.toFixed(1)} deg/s`,
+    `deg/screen  ${(pointer.degPerScreen / pointer.sensitivity).toFixed(0)} · gyro ${pointer.hasGyro ? 'yes' : 'NO — orientation only'}`,
     `mode        ${pointer.mode}`,
-    `grip        ${pointer.frame ? (pointer.frame.axis === 'y' ? 'flat' : 'upright') : '—'}`,
     `hover       ${hovered === 'wii' ? 'Wii button' : hovered && hovered.dir !== undefined ? 'arrow' : hovered && hovered.game ? hovered.game.title : '—'}`,
     `sensor      ${link.rate.toFixed(0)} Hz`,
     `channels    ${games.length}`,
@@ -731,7 +679,7 @@ resize();
 requestAnimationFrame(frame);
 
 window.__openwii = {
-  scene, camera, renderer, tiles, arrows, pointer, calibration, audio, link,
+  scene, camera, renderer, tiles, arrows, pointer, audio, link,
   hitTest, toWorld, pressA, pressB, step, layout: L,
   state: () => ({ hovered, launching: !!launching, page, games, fps }),
 };

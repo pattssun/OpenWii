@@ -16,7 +16,7 @@ const $ = (id) => document.getElementById(id);
 const els = {
   net: $('net'), dotNet: $('dot-net'), hz: $('hz'),
   gate: $('gate'), live: $('live'), enable: $('enable'),
-  calibrate: $("calibrate"), recentre: $("recentre"),
+  recentre: $("recentre"),
   btnA: $("btn-a"), btnB: $("btn-b"),
   yaw: $('v-yaw'), pitch: $('v-pitch'), roll: $('v-roll'),
   canvas: $('c'), cal: $('cal'), calTitle: $('cal-title'), calBody: $('cal-body'),
@@ -332,7 +332,6 @@ els.enable.addEventListener('click', async () => {
   }
 });
 
-els.calibrate.addEventListener('click', () => socket.emit('command', { type: 'calibrate' }));
 els.recentre.addEventListener('click', () => socket.emit('command', { type: 'recentre' }));
 
 // A and B. Sent on pointerdown rather than click so the press lands as soon as
