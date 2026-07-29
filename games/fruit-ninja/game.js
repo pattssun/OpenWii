@@ -458,7 +458,7 @@ setInterval(() => {
   if (!$('debug').classList.contains('on')) return;
   $('debug').textContent = [
     `mode        ${pointer.mode}`,
-    `gyro gain k ${pointer.k.toFixed(2)} ${pointer.kLearned ? '(learned)' : '(default)'}`,
+    `gyro map    ${pointer.describeMap()}`,
     `rate        ${pointer.rateDps.yaw.toFixed(1)} / ${pointer.rateDps.pitch.toFixed(1)} deg/s`,
     `pointer     ${pointer.display.x.toFixed(3)}, ${pointer.display.y.toFixed(3)}`,
     `gesture     ${game.trail.speed().toFixed(2)} u/s`,

@@ -220,11 +220,23 @@ is learned by comparing gyro-integrated angle against orientation heading
 change over ~150ms windows — windowed because differencing noisy orientation
 per-sample amplifies noise 60× and once fooled the gate.
 
-Verified (all numeric, no hand-derived sign conventions): deg/s, rad/s and
-mirrored phones all track a sweep within 5–6% demeaned error; 200ms of
-orientation lag does not slow the cursor at all; a vertical swing produces no
-horizontal motion at any grip roll; the cursor is still at rest; stillness
-never corrupts the learned gain; packets stopping freezes rather than coasts.
+**Addendum (same day): device gyro conventions are now learned, not assumed.**
+A real phone reported its gyro on different axis labels than the W3C spec
+implies — swinging up moved the cursor sideways, a bug invisible to any
+simulation sharing the code's assumption. The pointer now derives ground-truth
+body rates from consecutive orientation attitudes (convention-free by
+construction), learns which reported column carries which body axis (with sign
+and scale — permutation, mirroring, deg-vs-rad all absorbed), and only trusts
+the learned map once its predictions match reality. Until then, and on devices
+that never earn trust, smoothed ground truth drives the cursor: softer, never
+wrong. Pitch is also now taken about the geometrically computed user-right
+axis, so landscape grips work too.
+
+Verified (attitudes quaternion-composed, all gyro signals numeric): spec,
+swapped-axes, mirrored and rad/s phones all learn, earn trust and track within
+6%; garbage gyro is never trusted and directions stay correct via fallback;
+vertical swings stay vertical in flat, upright and landscape grips; 100ms of
+orientation lag doesn't slow the cursor; 300ms degrades to correct-but-soft.
 
 ## Risks
 

@@ -1,77 +1,117 @@
-import { clamp, dot, angleDelta, axesFromSample, DEG } from './orientation.js';
+import { clamp, dot, cross, scale, length, axesFromSample, DEG } from './orientation.js';
 
 /**
- * The pointer, rebuilt from scratch: rate-based gyro aiming.
+ * The pointer: rate-based gyro aiming with a learned, per-device axis map.
  *
- * Why this design and not absolute pointing
- * ------------------------------------------
- * The phone offers two motion signals. `deviceorientation` is the OS's fused
- * attitude estimate — absolute, but inherently lagged, with yaw referenced to
- * a magnetometer that wanders. `rotationRate` is the raw gyroscope — a clean,
- * zero-lag angular *velocity* with no absolute reference at all.
+ * Why rate-based (unchanged from the rebuild)
+ * -------------------------------------------
+ * Absolute pointing needs an absolute reference; the Wii Remote had an IR
+ * camera watching the sensor bar, a phone has nothing to look at. Rate-based
+ * aiming — cursor velocity = angular velocity — is what every post-Wii
+ * console does for gyro-without-optics, and what the ZIG SIM demo behind this
+ * project does. Drift is a non-issue: the cursor clamps at the screen edges
+ * and the player self-corrects, like a mouse at the edge of a desk.
  *
- * Absolute pointing needs an absolute reference. The Wii Remote had one: an IR
- * camera watching the sensor bar. A phone has nothing to look at, so every
- * absolute design ends up built on the laggy orientation estimate and then
- * buried under compensation — filters, prediction, drift correction, fusion.
- * A previous version of this file was 448 lines of exactly that, and each fix
- * surfaced a new artifact.
+ * Why NOTHING here assumes a gyro axis convention
+ * -----------------------------------------------
+ * Browsers genuinely disagree about `rotationRate`: which reported component
+ * corresponds to which body axis, which sign, and even the unit (deg/s vs
+ * rad/s — a 57× difference). Assuming the spec's labels produced a bug where
+ * swinging up moved the cursor sideways: a 90° axis confusion, invisible in
+ * any simulation that assumes the same convention as the code. This project
+ * has now been burned three separate times by hand-derived conventions.
  *
- * Rate-based aiming is what the industry converged on for gyro-without-optics:
- * Splatoon, Zelda, Steam Input. Cursor velocity = angular velocity. The gyro's
- * cleanliness becomes precision, its zero lag becomes immediacy, and drift is
- * a non-problem because the cursor clamps at the screen edges and the player
- * self-corrects — the same way a mouse recovers from hitting the edge of a
- * desk. It is also how the ZIG SIM demo that inspired this project works.
+ * So the device's convention is *learned*, not assumed:
  *
- * The mapping
- * -----------
- *   yaw rate   = ω · up      (rotation about world-up — turning left/right)
- *   pitch rate = ω · x_body  (rotation about the phone's right edge — up/down)
+ *   1. Ground truth: body angular velocity computed from consecutive
+ *      orientation attitudes. Convention-free by construction — it comes from
+ *      the attitude matrix itself. Lagged and noisy, but always pointing the
+ *      right way. Until the gyro is trusted, smoothed ground truth drives the
+ *      cursor directly, so the axes are correct on every device from the
+ *      first second (merely a little softer).
  *
- * `up` expressed in the body frame comes from the orientation sample. Its lag
- * is harmless here: only the *direction* of gravity is taken from it, which
- * changes slowly, never the pointer's motion. This projection makes the
- * pointer grip-agnostic — flat like a Wii Remote or upright like a TV remote,
- * rotation about world-up is yaw either way. No calibration step required.
+ *   2. Learning: each reported gyro component is correlated against each true
+ *      body axis over windows of real motion. That yields a per-axis mapping
+ *      (which column, which sign, what scale) — permutation, mirroring and
+ *      units all absorbed at once. Reported samples are compared against
+ *      slightly-delayed truth so the orientation estimate's lag cannot bias
+ *      the correlation.
  *
- * The one learned constant
- * ------------------------
- * Browsers disagree about `rotationRate`: most report deg/s, some rad/s (a
- * 57× difference — a cursor 57× too slow), and sign conventions have
- * historically varied. One scalar `k` absorbs all of it, learned by comparing
- * total gyro-integrated angle against total orientation heading change during
- * real motion. The magnitude ratio uses summed absolute increments, which is
- * immune to the orientation lag's phase shift; the sign comes from their
- * correlation. Until enough motion has been seen, k stays 1 (correct for the
- * common deg/s case).
+ *   3. Trust gate: the mapping is only used once its predictions actually
+ *      match the ground truth (small residual). A device that reports
+ *      something unlearnable simply stays on ground-truth rates — degraded
+ *      latency, never wrong directions.
+ *
+ * The screen mapping is geometric, computed fresh from the live attitude:
+ *   yaw   = ω · up            (turning about world-up: left/right)
+ *   pitch = ω · right          right = forward × up, forward = whichever beam
+ *                              axis (top edge or back) is most horizontal
+ * which makes it grip-agnostic — flat, upright, or landscape — with no
+ * calibration step.
  */
+
+const norm = (v) => {
+  const L = length(v) || 1;
+  return { x: v.x / L, y: v.y / L, z: v.z / L };
+};
+
+/** Body-frame angular velocity between two attitudes, deg/s. Convention-free. */
+function omegaFromAttitudes(a1, a2, dt) {
+  const col = (a, k) => [a[k].x, a[k].y, a[k].z];
+  const R1 = [col(a1, 'x'), col(a1, 'y'), col(a1, 'z')];
+  const R2 = [col(a2, 'x'), col(a2, 'y'), col(a2, 'z')];
+  const M = [0, 1, 2].map((i) => [0, 1, 2].map(
+    (j) => R1[i][0] * R2[j][0] + R1[i][1] * R2[j][1] + R1[i][2] * R2[j][2],
+  ));
+  return {
+    x: (M[2][1] - M[1][2]) / (2 * dt) / DEG,
+    y: (M[0][2] - M[2][0]) / (2 * dt) / DEG,
+    z: (M[1][0] - M[0][1]) / (2 * dt) / DEG,
+  };
+}
+
+const AXES = ['x', 'y', 'z'];
+
 export class Pointer {
   constructor(options = {}) {
     this.sensitivity = options.sensitivity ?? 1;
     // Degrees of turn to cross the full screen width at sensitivity 1.
     this.degPerScreen = options.degPerScreen ?? 30;
-    // Vertical uses a tighter span — screens are wide, wrists pitch less.
     this.aspect = options.aspect ?? 0.6;
-    // Below this angular speed the hand is trembling, not aiming. Ignoring it
-    // keeps the cursor rock-still at rest with no smoothing lag while moving.
-    this.deadzoneDps = options.deadzoneDps ?? 0.3;
     this.invertX = false;
     this.invertY = false;
+
+    // Below this the hand is trembling, not aiming. The learned-gyro path is
+    // clean enough for a tight threshold; the ground-truth fallback carries
+    // differentiated orientation noise and needs a wider one, which is part
+    // of why it is only the fallback.
+    this.deadzoneDps = options.deadzoneDps ?? 0.3;
+    this.fallbackDeadzoneDps = options.fallbackDeadzoneDps ?? 4;
 
     this.pos = { x: 0.5, y: 0.5 };
     this.rate = { x: 0, y: 0 };            // screen fractions per second
     this.rateDps = { yaw: 0, pitch: 0 };   // for the debug overlay
 
-    // Unit/sign auto-gain (see header). k maps reported gyro units to deg/s.
-    this.k = 1;
-    this.kAbsO = 0;      // Σ|orientation heading change|, degrees
-    this.kAbsG = 0;      // Σ|gyro yaw increment|, reported units
-    this.kDot = 0;       // Σ o·g — sign evidence
-    this.kLearned = false;
+    // ── Ground truth ──
+    this.prevAxes = null;
+    this.emaO = { x: 0, y: 0, z: 0 };      // smoothed true body rates
+    this.emaTau = 0.08;
 
-    this.win = { head0: 0, g: 0, t: 0 };   // current learning window
-    this.prevUsedX = null;
+    // ── Axis-map learning ──
+    this.ring = [];                        // recent reported r, for lag alignment
+    this.C = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];   // Σ trueᵢ · reportedⱼ
+    this.absO = [0, 0, 0];                 // Σ|trueᵢ| during motion, degrees
+    this.absR = [0, 0, 0];                 // Σ|reportedⱼ| during motion
+    this.map = [null, null, null];         // per true axis: { col, sign, scale }
+    // Residual gate state. emaM smooths the mapped gyro with the SAME filter
+    // as the ground truth — comparing raw against smoothed would bake a ~50%
+    // phantom residual into even a perfect device (gain 0.89, phase 27° at
+    // 1Hz), which is exactly the kind of self-inflicted mismatch this file
+    // keeps having to learn about.
+    this.emaM = { x: 0, y: 0, z: 0 };
+    this.resBad = 0;
+    this.resAll = 0;
+    this.gyroTrusted = false;
 
     this.live = false;
     this.lastSeen = 0;
@@ -106,6 +146,15 @@ export class Pointer {
     this.rate.y = 0;
   }
 
+  /** One-line summary of the learned device map, for the debug overlay. */
+  describeMap() {
+    if (!this.hasGyro) return 'no gyro — orientation only';
+    if (!this.gyroTrusted) return 'learning (orientation fallback)';
+    return this.map.map((m, i) => (m
+      ? `${AXES[i]}←${AXES[m.col]}${m.sign > 0 ? '+' : '−'}${m.scale.toFixed(m.scale > 5 ? 0 : 2)}`
+      : `${AXES[i]}∅`)).join(' ');
+  }
+
   /** Feed one packet from the phone. `dt` = seconds since the previous one. */
   update(sample, dt, now = 0) {
     const axes = axesFromSample(sample);
@@ -113,77 +162,167 @@ export class Pointer {
     this.live = true;
     this.lastSeen = now;
 
-    // World-up in the body frame: the world-z component of each body axis.
-    const up = { x: axes.x.z, y: axes.y.z, z: axes.z.z };
+    // ── Ground-truth body rates from the attitude itself ──
+    let omegaTrue = { x: 0, y: 0, z: 0 };
+    if (this.prevAxes && dt > 0 && dt < 0.1) {
+      omegaTrue = omegaFromAttitudes(this.prevAxes, axes, dt);
+      const k = clamp(dt / this.emaTau, 0, 1);
+      this.emaO.x += (omegaTrue.x - this.emaO.x) * k;
+      this.emaO.y += (omegaTrue.y - this.emaO.y) * k;
+      this.emaO.z += (omegaTrue.z - this.emaO.z) * k;
+    }
+    this.prevAxes = axes;
 
     const m = sample.motion;
-    let yawRaw = 0;
-    let pitchRaw = 0;
-    if (m && (m.rx || m.ry || m.rz)) {
-      this.hasGyro = true;
-      const omega = { x: m.rx || 0, y: m.ry || 0, z: m.rz || 0 };
-      yawRaw = dot(omega, up);
-      pitchRaw = omega.x;
-    }
+    const r = m ? [m.rx || 0, m.ry || 0, m.rz || 0] : null;
+    if (r && (r[0] || r[1] || r[2])) this.hasGyro = true;
 
-    // World heading of the most horizontal body axis — the k-learning
-    // reference. Which axis qualifies can change mid-flight (phone rolled to
-    // landscape); skip the sample where it switches rather than compare
-    // headings of two different axes.
-    const useX = Math.abs(axes.x.z) <= Math.abs(axes.z.z);
-    const ax = useX ? axes.x : axes.z;
-    const head = Math.atan2(ax.y, ax.x) / DEG;
+    // ── Learn the device's axis map ──
+    if (r && this.hasGyro && dt > 0 && dt < 0.1) {
+      // Compare against reported samples from ~50ms ago so the orientation
+      // estimate's lag lines up with the gyro instead of biasing the fit.
+      this.ring.push(r);
+      const delaySlots = Math.max(1, Math.round(0.05 / Math.max(dt, 1 / 240)));
+      while (this.ring.length > delaySlots + 1) this.ring.shift();
+      const rDel = this.ring[0];
 
-    // Learning is evaluated over ~150ms windows, not per sample. Differencing
-    // a noisy orientation at 60Hz amplifies the noise by 60 — 0.15° of jitter
-    // reads as 9°/s of phantom "motion", which once fooled this gate into
-    // dividing real-looking orientation motion by near-zero gyro motion and
-    // slamming k to the clamp. Over a window, real rotation integrates and
-    // noise cancels, so the two are finally distinguishable.
-    if (this.hasGyro && this.prevUsedX === useX && dt > 0 && dt < 0.1) {
-      this.win.g += yawRaw * dt;
-      this.win.t += dt;
-      if (this.win.t >= 0.15) {
-        const o = angleDelta(head, this.win.head0);
-        // ≥ ~5°/s of sustained rotation; sensor jitter stays far below this.
-        if (Math.abs(o) > 0.8) {
-          const decay = Math.exp(-this.win.t / 30);
-          this.kAbsO = this.kAbsO * decay + Math.abs(o);
-          this.kAbsG = this.kAbsG * decay + Math.abs(this.win.g);
-          this.kDot = this.kDot * decay + o * this.win.g;
-          // ≥10° of witnessed motion before overriding the deg/s default.
-          if (this.kAbsO > 10 && this.kAbsG > 1e-9) {
-            this.k = clamp(Math.sign(this.kDot || 1) * (this.kAbsO / this.kAbsG), -80, 80);
-            this.kLearned = true;
+      const moving = length(this.emaO) > 10;   // deg/s of smoothed real motion
+      if (moving && rDel) {
+        const decay = Math.exp(-dt / 30);
+        const t = [this.emaO.x, this.emaO.y, this.emaO.z];
+        for (let i = 0; i < 3; i += 1) {
+          this.absO[i] = this.absO[i] * decay + Math.abs(t[i]) * dt;
+          this.absR[i] = this.absR[i] * decay + Math.abs(rDel[i]) * dt;
+          for (let j = 0; j < 3; j += 1) {
+            this.C[i][j] = this.C[i][j] * decay + t[i] * rDel[j] * dt;
           }
         }
-        this.win = { head0: head, g: 0, t: 0 };
-      }
-    } else {
-      this.win = { head0: head, g: 0, t: 0 };
-    }
-    this.prevUsedX = useX;
 
-    let yawDps = this.k * yawRaw;
-    let pitchDps = this.k * pitchRaw;
-    if (Math.abs(yawDps) < this.deadzoneDps) yawDps = 0;
-    if (Math.abs(pitchDps) < this.deadzoneDps) pitchDps = 0;
+        // Claim a reported column for each true axis. Rules learned from
+        // watching this flap in practice:
+        //  - relative floor: an axis with under 15% of the dominant axis's
+        //    motion is cross-talk and tremor, not signal. Claiming it adds
+        //    nothing to the projections and destabilises the map. (Observed:
+        //    the roll axis crept over an absolute threshold after 5s and its
+        //    arrival reset the trust trial.)
+        //  - sticky: an existing claim is kept unless a decisively different
+        //    column wins, so evidence noise can't flap the map.
+        //  - unique: greedy by motion, no two axes may claim one column.
+        const maxAbsO = Math.max(...this.absO, 1e-9);
+        const order = [0, 1, 2].sort((a, b) => this.absO[b] - this.absO[a]);
+        const taken = new Set();
+        const newMap = [null, null, null];
+        for (const i of order) {
+          const prev = this.map[i];
+          const avail = this.C[i].map((v, j) => (taken.has(j) ? 0 : Math.abs(v)));
+          const best = avail.indexOf(Math.max(...avail));
+          const second = Math.max(...[0, 1, 2].filter((j) => j !== best)
+            .map((j) => Math.abs(this.C[i][j])));
+          const decisive = avail[best] > 2 * second && this.absR[best] > 1e-9;
+          const eligible = this.absO[i] >= 15 && this.absO[i] >= 0.15 * maxAbsO;
+
+          if (prev && !taken.has(prev.col) && !(decisive && best !== prev.col && eligible)) {
+            const sign = Math.sign(this.C[i][prev.col]) || prev.sign;
+            newMap[i] = {
+              col: prev.col,
+              sign,
+              scale: this.absO[i] / Math.max(this.absR[prev.col], 1e-9),
+            };
+            taken.add(prev.col);
+          } else if (eligible && decisive) {
+            newMap[i] = {
+              col: best,
+              sign: Math.sign(this.C[i][best]),
+              scale: this.absO[i] / Math.max(this.absR[best], 1e-9),
+            };
+            taken.add(best);
+          }
+        }
+        this.map = newMap;
+        const shape = this.map.map((mm) => (mm ? `${mm.col}${mm.sign > 0 ? '+' : '-'}` : '-'));
+
+        // A different assignment means the old residual history judged a
+        // different map. Start its trial fresh.
+        const shapeKey = shape.join('');
+        if (shapeKey !== this.mapShape) {
+          this.mapShape = shapeKey;
+          this.resBad = 0;
+          this.resAll = 0;
+        }
+
+        // Trust the map only when its predictions match reality — compared
+        // through the same smoothing filter on both sides.
+        const mapped = this.applyMap(rDel);
+        const km = clamp(dt / this.emaTau, 0, 1);
+        this.emaM.x += (mapped.x - this.emaM.x) * km;
+        this.emaM.y += (mapped.y - this.emaM.y) * km;
+        this.emaM.z += (mapped.z - this.emaM.z) * km;
+        const err = Math.hypot(this.emaM.x - this.emaO.x, this.emaM.y - this.emaO.y, this.emaM.z - this.emaO.z);
+        this.resBad = this.resBad * decay + err * dt;
+        this.resAll = this.resAll * decay + length(this.emaO) * dt;
+
+        // 0.6 sits between the two populations with wide margin: a correct
+        // map on a device with 30-100ms of orientation lag scores 0.05-0.45
+        // (residual phase the 50ms ring can't fully align), while a wrong
+        // column scores >=1.0 (uncorrelated) and a wrong sign ~2.0.
+        const pitchClaimed = this.map[0] !== null;
+        const yawClaimed = this.map[1] !== null || this.map[2] !== null;
+        this.gyroTrusted = pitchClaimed && yawClaimed
+          && this.resAll > 1 && this.resBad / this.resAll < 0.6;
+      }
+    }
+
+    // ── Live body rates: learned gyro if trusted, ground truth otherwise ──
+    let omega;
+    let deadzone;
+    if (this.gyroTrusted && r) {
+      omega = this.applyMap(r);
+      deadzone = this.deadzoneDps;
+    } else {
+      omega = this.emaO;
+      deadzone = this.fallbackDeadzoneDps;
+    }
+
+    // ── Geometry: grip-agnostic screen axes from the live attitude ──
+    // up = world-up in the body frame (world-z component of each body axis).
+    const up = { x: axes.x.z, y: axes.y.z, z: axes.z.z };
+    // forward = whichever beam axis (top edge, or out the back) is most
+    // horizontal right now; right = forward × up. Computed per-packet, so
+    // portrait, upright and landscape grips all pitch about the user's right.
+    const beamY = axes.y;
+    const beamZ = scale(axes.z, -1);
+    const fwd = Math.abs(beamY.z) <= Math.abs(beamZ.z) ? beamY : beamZ;
+    const right = norm(cross(fwd, up));
+
+    let yawDps = dot(omega, up);
+    let pitchDps = dot(omega, right);
+    if (Math.abs(yawDps) < deadzone) yawDps = 0;
+    if (Math.abs(pitchDps) < deadzone) pitchDps = 0;
     this.rateDps = { yaw: yawDps, pitch: pitchDps };
 
     // Positive yaw = counterclockwise from above = pointing left → cursor
-    // left. Positive pitch about the right edge = pointing up → cursor up.
-    // (Verified numerically in core.test.mjs, not trusted from derivation —
-    // and a device with mirrored conventions flips k, which flips both.)
+    // left; positive pitch about user-right = pointing up → cursor up.
+    // (Both verified numerically in core.test.mjs across grips and device
+    // conventions — never trusted from derivation.)
     const sx = this.sensitivity * (this.invertX ? -1 : 1);
     const sy = this.sensitivity * (this.invertY ? -1 : 1);
     this.rate.x = (-yawDps / this.degPerScreen) * sx;
     this.rate.y = (-pitchDps / (this.degPerScreen * this.aspect)) * sy;
   }
 
+  /** Reported gyro → true body rates through the learned map. */
+  applyMap(r) {
+    const out = { x: 0, y: 0, z: 0 };
+    for (let i = 0; i < 3; i += 1) {
+      const mm = this.map[i];
+      out[AXES[i]] = mm ? mm.sign * mm.scale * r[mm.col] : 0;
+    }
+    return out;
+  }
+
   /**
    * Where to draw the cursor this frame. Integrates the current angular rate
-   * at display rate, so motion is continuous regardless of packet rate —
-   * exact integration of a velocity signal, not extrapolation of a position.
+   * at display rate, so motion is continuous regardless of packet rate.
    */
   sampleAt(now) {
     if (!this.lastDraw) this.lastDraw = now;
@@ -191,7 +330,6 @@ export class Pointer {
     this.lastDraw = now;
     if (!(dt > 0) || dt > 0.25) dt = 0;
 
-    // If packets stop, freeze rather than coast on a stale rate.
     if (this.live && now - this.lastSeen < 250) {
       this.pos.x = clamp(this.pos.x + this.rate.x * dt, 0, 1);
       this.pos.y = clamp(this.pos.y + this.rate.y * dt, 0, 1);

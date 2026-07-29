@@ -664,7 +664,7 @@ setInterval(() => {
     `fps         ${fps.toFixed(0)}`,
     `pointer     ${pointer.display.x.toFixed(3)}, ${pointer.display.y.toFixed(3)}`,
     `lead        ${(pointer.lead*1000).toFixed(0)}ms  vel ${Math.hypot(pointer.vel.x, pointer.vel.y).toFixed(2)}/s`,
-    `gyro gain k ${pointer.k.toFixed(2)} ${pointer.kLearned ? '(learned)' : '(default)'}`,
+    `gyro map    ${pointer.describeMap()}`,
     `rate        ${pointer.rateDps.yaw.toFixed(1)} / ${pointer.rateDps.pitch.toFixed(1)} deg/s`,
     `deg/screen  ${(pointer.degPerScreen / pointer.sensitivity).toFixed(0)} · gyro ${pointer.hasGyro ? 'yes' : 'NO — orientation only'}`,
     `mode        ${pointer.mode}`,
