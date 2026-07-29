@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Swordplay — OpenWii</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden; cursor: none;
+    background: #9fd8f0; color: #21323f;
+    font: 500 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    user-select: none;
+  }
+  canvas { display: block; position: absolute; inset: 0; width: 100%; height: 100%; }
+
+  #hud { position: absolute; inset: 0; pointer-events: none; padding: 26px 32px; }
+  .score {
+    position: absolute; top: 26px; font-size: 30px; letter-spacing: 6px;
+    text-shadow: 0 2px 8px #0002; font-weight: 800;
+  }
+  #p-score { left: 32px; color: #1d6fd1; }
+  #a-score { right: 32px; color: #8e4fd0; }
+  .tag { position: absolute; top: 66px; font-size: 12px; font-weight: 700;
+         letter-spacing: .14em; color: #48627a; text-transform: uppercase; }
+  #p-tag { left: 34px; } #a-tag { right: 34px; }
+
+  #banner {
+    position: absolute; left: 50%; top: 24%; transform: translateX(-50%) scale(0.9);
+    font-size: 54px; font-weight: 900; letter-spacing: -0.02em; color: #fff;
+    text-shadow: 0 4px 18px #0006; opacity: 0; transition: all .15s ease;
+    white-space: nowrap;
+  }
+  #banner.on { opacity: 1; transform: translateX(-50%) scale(1); }
+
+  #keys {
+    position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%);
+    font-size: 11px; color: #3f596e; letter-spacing: .02em;
+  }
+  #keys a { color: inherit; pointer-events: auto; }
+  #link {
+    position: absolute; right: 30px; bottom: 24px; display: flex; align-items: center;
+    gap: 9px; font-size: 13px; color: #35505f; background: #ffffffbb;
+    border: 1px solid #b9d2df; padding: 9px 14px; border-radius: 999px;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #92a9b5; }
+  .dot.on { background: #2fb56b; }
+  #debug {
+    position: absolute; right: 30px; top: 96px; margin: 0; display: none;
+    background: #ffffffd9; border: 1px solid #b9d2df; border-radius: 12px;
+    padding: 13px 15px; font: 12px/1.6 ui-monospace, Menlo, monospace; color: #35505f;
+    white-space: pre;
+  }
+  #debug.on { display: block; }
+
+  #overlay {
+    position: absolute; inset: 0; display: grid; place-items: center; z-index: 5;
+    background: radial-gradient(ellipse at 50% 40%, #cfeafbee, #9fd8f0f5 70%);
+  }
+  #overlay.hide { display: none; }
+  .panel { text-align: center; max-width: 560px; padding: 0 30px; }
+  .panel h1 { font-size: 56px; margin: 0 0 8px; letter-spacing: -0.04em; font-weight: 800; }
+  .panel h1 em { font-style: normal;
+    background: linear-gradient(120deg, #1d6fd1, #8e4fd0);
+    -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .panel p { color: #46637a; margin: 0 auto 24px; max-width: 430px; }
+  .cta { font-size: 14px; color: #46637a; }
+  .cta strong { color: #21323f; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud">
+  <div class="score" id="p-score">○○○</div><div class="tag" id="p-tag">You</div>
+  <div class="score" id="a-score">○○○</div><div class="tag" id="a-tag">Rival</div>
+  <div id="banner"></div>
+  <div id="keys"><a href="/">← Games</a> · <b>A</b>/Space start · swing to strike ·
+    hold blade ACROSS the red strike to block · <b>C</b> re-centre · <b>D</b> debug</div>
+  <div id="link"><span class="dot" id="dot"></span><span id="link-t">no remote connected</span></div>
+  <pre id="debug"></pre>
+</div>
+
+<div id="overlay">
+  <div class="panel" id="panel">
+    <h1>⚔️ <em>Swordplay</em></h1>
+    <p>Your phone is the sword — it mirrors every tilt and roll. Swing fast to
+       strike around your rival's guard. When the red ring flashes, hold your
+       blade <b>across</b> the incoming strike to block it.</p>
+    <div class="cta"><strong>A</strong> or <strong>Space</strong> to duel · <strong>B</strong> menu</div>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script type="module" src="game.js"></script>
+</body>
+</html>

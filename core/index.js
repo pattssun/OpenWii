@@ -12,3 +12,5 @@ export * from './pointer.js';
 export * from './trail.js';
 export * from './audio.js';
 export * from './net.js';
+export * from './gesture.js';
+export * from './channel.js';
