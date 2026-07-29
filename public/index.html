@@ -47,6 +47,7 @@
   #keys {
     position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%);
     font-size: 11px; color: #8494a7; z-index: 10; letter-spacing: .02em;
+    white-space: nowrap;
   }
   #speed {
     position: absolute; left: 50%; bottom: 34px; transform: translateX(-50%);
@@ -61,6 +62,16 @@
     font: 11px/1.6 ui-monospace, Menlo, monospace; color: #5c6e83; white-space: pre;
   }
   #debug.on { display: block; }
+
+  /* Narrow windows: the pairing card shrinks and the desk-keyboard hint goes —
+     it collides with the bar, and on a window that shape you're pairing a
+     phone, not testing with a keyboard. */
+  @media (max-width: 720px) {
+    #keys { display: none; }
+    #pair { gap: 9px; padding: 8px 11px 8px 8px; }
+    #pair img { width: 46px; height: 46px; }
+    #pair-url { font-size: 9px; }
+  }
 </style>
 </head>
 <body>

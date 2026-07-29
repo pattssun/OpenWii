@@ -19,9 +19,7 @@ import { clamp } from '/core/orientation.js';
 const $ = (id) => document.getElementById(id);
 
 // ── Layout constants ───────────────────────────────────────────────────────
-const COLS = 4;
-const ROWS = 3;
-const PER_PAGE = COLS * ROWS;
+const PER_PAGE = 12;          // every grid shape below multiplies to this
 const TILE_W = 3.4;
 const TILE_H = 2.5;
 const GAP_X = 0.34;
@@ -150,26 +148,39 @@ function drawTileFace(g, w, h, game) {
 /**
  * Layout, recomputed on resize.
  *
- * The grid has fixed proportions but the window does not, so everything is
- * scaled to fit the narrower of the two axes. Without this the outer columns
- * simply fall off the screen on a portrait or split-screen window.
+ * The window can be any shape, so two things adapt: the grid reflows (4×3 in
+ * landscape, 3×4 around square, 2×6 in portrait — always 12 slots), and the
+ * whole layout scales to fill whichever axis binds. Without the reflow a
+ * portrait window shows a tiny 4-wide strip lost in empty backdrop; without
+ * the fill, big windows waste most of their space.
  */
-const L = { scale: 1, x0: 0, y0: 0, stepX: 0, stepY: 0, arrowX: 0, arrowY: 0 };
+const L = { scale: 1, cols: 4, rows: 3, x0: 0, y0: 0, stepX: 0, stepY: 0, arrowX: 0, arrowY: 0 };
+
+function pickGrid(aspect) {
+  if (aspect >= 1.15) return [4, 3];
+  if (aspect >= 0.72) return [3, 4];
+  return [2, 6];
+}
 
 function computeLayout() {
-  const gridW = COLS * TILE_W + (COLS - 1) * GAP_X;
-  const gridH = ROWS * TILE_H + (ROWS - 1) * GAP_Y;
+  [L.cols, L.rows] = pickGrid(camera.aspect);
+  const gridW = L.cols * TILE_W + (L.cols - 1) * GAP_X;
+  const gridH = L.rows * TILE_H + (L.rows - 1) * GAP_Y;
   const halfH = VIEW_H / 2;
   const halfW = halfH * camera.aspect;
 
-  const top = halfH;
+  // Reserve headroom for the pairing card / link pill, which live in CSS
+  // pixels — convert their footprint into world units at the current size.
+  const topPad = (110 * VIEW_H) / Math.max(420, window.innerHeight);
+  const top = halfH - topPad;
   const barTop = -halfH + BAR_H + 0.36;
   const availH = top - barTop;
   const availW = halfW * 2;
 
-  // Leave room for a page arrow on each side plus a margin.
+  // Leave room for a page arrow on each side plus a margin. The 1.3 cap stops
+  // tiles going comically large on big near-square windows.
   const needW = gridW + 2 * 1.7 + 0.6;
-  L.scale = Math.min(1, availW / needW, availH / (gridH + 0.9));
+  L.scale = Math.min(1.3, availW / needW, availH / (gridH + 0.9));
 
   L.stepX = (TILE_W + GAP_X) * L.scale;
   L.stepY = (TILE_H + GAP_Y) * L.scale;
@@ -184,8 +195,8 @@ function computeLayout() {
 function applyLayout() {
   for (let i = 0; i < tiles.length; i += 1) {
     const t = tiles[i];
-    const col = i % COLS;
-    const row = Math.floor(i / COLS);
+    const col = i % L.cols;
+    const row = Math.floor(i / L.cols);
     t.home.set(L.x0 + col * L.stepX, L.y0 - row * L.stepY, 0);
     t.mesh.position.copy(t.home);
     t.mesh.scale.setScalar(L.scale);
@@ -221,13 +232,30 @@ function buildTiles() {
 }
 
 // ── Bottom bar ─────────────────────────────────────────────────────────────
-const barW = 26;
-const bar = makeTexture(barW, BAR_H, () => {});
+// The bar spans the window at any width. Its texture is regenerated at the
+// real aspect on resize — scaling a fixed-width texture down squashes the Wii
+// button and clock into an unreadable smear on narrow windows.
+let barW = 26;
+let bar = makeTexture(barW, BAR_H, () => {});
 const barMesh = new THREE.Mesh(
   new THREE.PlaneGeometry(barW, BAR_H),
   new THREE.MeshBasicMaterial({ map: bar.texture, transparent: true }),
 );
 scene.add(barMesh);
+
+function rebuildBar() {
+  const halfW = (VIEW_H / 2) * camera.aspect;
+  const want = Math.max(6, Math.min(26, halfW * 2 - 0.5));
+  if (Math.abs(want - barW) < 0.05) return;
+  barW = want;
+  bar.texture.dispose();
+  bar = makeTexture(barW, BAR_H, () => {});
+  barMesh.geometry.dispose();
+  barMesh.geometry = new THREE.PlaneGeometry(barW, BAR_H);
+  barMesh.material.map = bar.texture;
+  barMesh.material.needsUpdate = true;
+  drawBar();
+}
 
 let wiiButtonPulse = 0;
 let wiiButtonHover = 0;
@@ -489,9 +517,8 @@ function resize() {
   pointer.setViewport(w, h);
 
   const halfH = VIEW_H / 2;
-  const halfW = halfH * camera.aspect;
   barMesh.position.set(0, -halfH + BAR_H / 2 + 0.18, 0.05);
-  barMesh.scale.x = Math.min(1, (halfW * 2 - 0.5) / barW);
+  rebuildBar();
 
   computeLayout();
   if (tiles.length) applyLayout();
@@ -513,7 +540,7 @@ function hitTest(wx, wy) {
       && Math.abs(wy - a.mesh.position.y) < 0.85 * L.scale) return a;
   }
   if (wy < barMesh.position.y + BAR_H / 2 && wy > barMesh.position.y - BAR_H / 2) {
-    const bx = -barW * barMesh.scale.x / 2 + 1.4;
+    const bx = -barW / 2 + 1.4;
     if (wx > bx - 1.2 && wx < bx + 2.2) return 'wii';
     return null;
   }
