@@ -43,18 +43,20 @@ const key = new THREE.DirectionalLight(0xffffff, 0.75);
 key.position.set(-2, 5, 8);
 scene.add(key);
 
-/** The Wii Menu's soft silver-white vertical wash. */
+/** The Wii Menu's soft silver-white wash, with its trademark fine scanlines. */
 function backdropTexture() {
   const c = document.createElement('canvas');
   c.width = 4;
-  c.height = 256;
+  c.height = 512;
   const g = c.getContext('2d');
-  const grad = g.createLinearGradient(0, 0, 0, 256);
+  const grad = g.createLinearGradient(0, 0, 0, 512);
   grad.addColorStop(0, '#f4f7fa');
   grad.addColorStop(0.55, '#e4eaf1');
   grad.addColorStop(1, '#ccd6e2');
   g.fillStyle = grad;
-  g.fillRect(0, 0, 4, 256);
+  g.fillRect(0, 0, 4, 512);
+  g.fillStyle = 'rgba(122, 140, 160, 0.055)';
+  for (let y = 0; y < 512; y += 3) g.fillRect(0, y, 4, 1);
   return new THREE.CanvasTexture(c);
 }
 scene.background = backdropTexture();
@@ -143,6 +145,17 @@ function drawTileFace(g, w, h, game) {
   g.textAlign = 'center';
   g.textBaseline = 'alphabetic';
   g.fillText(game.title, w / 2, h - pad - 20);
+
+  // Screen gloss: the diagonal sheen every real channel tile carries.
+  g.save();
+  roundRect(g, pad + 8, pad + 8, w - (pad + 8) * 2, h - (pad + 8) * 2 - 46, 20);
+  g.clip();
+  const gloss = g.createLinearGradient(0, pad, 0, h * 0.5);
+  gloss.addColorStop(0, 'rgba(255,255,255,0.5)');
+  gloss.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gloss;
+  g.fillRect(0, 0, w, h * 0.5);
+  g.restore();
 }
 
 /**
@@ -169,9 +182,9 @@ function computeLayout() {
   const halfH = VIEW_H / 2;
   const halfW = halfH * camera.aspect;
 
-  // Reserve headroom for the pairing card / link pill, which live in CSS
-  // pixels — convert their footprint into world units at the current size.
-  const topPad = (110 * VIEW_H) / Math.max(420, window.innerHeight);
+  // Reserve headroom for the link pill, which lives in CSS pixels — convert
+  // its footprint into world units at the current size.
+  const topPad = (66 * VIEW_H) / Math.max(420, window.innerHeight);
   const top = halfH - topPad;
   const barTop = -halfH + BAR_H + 0.36;
   const availH = top - barTop;
@@ -259,61 +272,129 @@ function rebuildBar() {
 
 let wiiButtonPulse = 0;
 let wiiButtonHover = 0;
+let qrHover = 0;
+let qrImg = null;            // pairing QR, drawn inside the right-hand button
 
+/**
+ * The original bar: a silver band whose top edge sweeps up around a round
+ * button at each end, an aqua line tracing the edge, the clock dead centre in
+ * quiet LCD grey. Left button says OpenWii; the right one — the console's
+ * envelope — is our pairing QR instead.
+ */
 function drawBar() {
   const { ctx: g, canvas: c } = bar;
   const w = c.width;
   const h = c.height;
   g.clearRect(0, 0, w, h);
 
-  roundRect(g, 6, 10, w - 12, h - 20, h * 0.42);
-  const grad = g.createLinearGradient(0, 0, 0, h);
-  grad.addColorStop(0, '#f2f5f9');
-  grad.addColorStop(1, '#d5dde8');
+  const cy = h * 0.56;               // circle centres sit slightly low
+  const r = h * 0.4;                 // round-button radius
+  const lx = h * 0.62;               // left circle centre x
+  const rx = w - h * 0.62;           // right circle centre x
+  const dip = h * 0.24;              // how far the middle edge sits below the swells
+
+  // Band with a wavy top edge: swells over each button, dips across the middle.
+  g.beginPath();
+  g.moveTo(0, h);
+  g.lineTo(0, cy - r * 0.55);
+  g.quadraticCurveTo(lx - r * 1.1, cy - r * 1.28, lx, cy - r * 1.28);
+  g.quadraticCurveTo(lx + r * 1.35, cy - r * 1.28, lx + r * 2.1, dip);
+  g.lineTo(rx - r * 2.1, dip);
+  g.quadraticCurveTo(rx - r * 1.35, cy - r * 1.28, rx, cy - r * 1.28);
+  g.quadraticCurveTo(rx + r * 1.1, cy - r * 1.28, w, cy - r * 0.55);
+  g.lineTo(w, h);
+  g.closePath();
+  const grad = g.createLinearGradient(0, dip, 0, h);
+  grad.addColorStop(0, '#f6f9fc');
+  grad.addColorStop(0.5, '#e6ecf3');
+  grad.addColorStop(1, '#ccd6e2');
   g.fillStyle = grad;
   g.fill();
-  g.strokeStyle = '#b7c3d2';
-  g.lineWidth = 3;
+  // The aqua edge line.
+  g.strokeStyle = '#9fd8ef';
+  g.lineWidth = 4;
   g.stroke();
+  // Cover the stroke on the three off-screen sides.
+  g.fillStyle = grad;
+  g.fillRect(-4, h - 3, w + 8, 6);
 
-  // The Wii button: a wide oval on the left, breathing a soft blue.
-  const bx = 44;
-  const bw = h * 2.1;
-  const bh = h * 0.62;
-  const by = (h - bh) / 2;
-  roundRect(g, bx, by, bw, bh, bh / 2);
-  const glow = 0.45 + 0.3 * Math.sin(wiiButtonPulse) + wiiButtonHover * 0.5;
-  g.fillStyle = '#eef4fb';
-  g.fill();
-  g.strokeStyle = `rgba(60, 150, 240, ${clamp(glow, 0, 1)})`;
-  g.lineWidth = 7;
-  g.stroke();
-  g.fillStyle = '#48617d';
-  g.font = `700 ${Math.round(bh * 0.5)}px -apple-system, system-ui, sans-serif`;
+  /** One round bar button: white face, grey ring, soft drop. */
+  const button = (x, hover, glow) => {
+    g.beginPath();
+    g.arc(x, cy, r + 3, 0, Math.PI * 2);
+    g.fillStyle = 'rgba(90, 110, 135, 0.18)';
+    g.fill();
+    g.beginPath();
+    g.arc(x, cy, r, 0, Math.PI * 2);
+    const face = g.createLinearGradient(0, cy - r, 0, cy + r);
+    face.addColorStop(0, '#ffffff');
+    face.addColorStop(1, '#dde5ee');
+    g.fillStyle = face;
+    g.fill();
+    g.strokeStyle = glow ? `rgba(80, 170, 240, ${clamp(glow, 0, 1)})` : '#b7c3d2';
+    g.lineWidth = glow ? 6 : 4;
+    g.stroke();
+    if (hover > 0.02) {
+      g.beginPath();
+      g.arc(x, cy, r + 6, 0, Math.PI * 2);
+      g.strokeStyle = `rgba(80, 170, 240, ${hover * 0.65})`;
+      g.lineWidth = 5;
+      g.stroke();
+    }
+  };
+
+  const pulse = 0.35 + 0.25 * Math.sin(wiiButtonPulse) + wiiButtonHover * 0.4;
+  button(lx, wiiButtonHover, pulse);
+  g.fillStyle = '#7d90a6';
+  g.font = `700 ${Math.round(r * 0.42)}px -apple-system, system-ui, sans-serif`;
   g.textAlign = 'center';
   g.textBaseline = 'middle';
-  g.fillText('Wii', bx + bw / 2, by + bh / 2 + 2);
+  g.fillText('OpenWii', lx, cy + 2);
 
-  // SD card slot, purely decorative.
-  const sx = bx + bw + 34;
-  roundRect(g, sx, by + bh * 0.18, bh * 0.72, bh * 0.64, 6);
-  g.fillStyle = '#c6d0dd';
+  button(rx, qrHover, 0);
+  if (qrImg && qrImg.complete) {
+    g.save();
+    g.beginPath();
+    g.arc(rx, cy, r * 0.78, 0, Math.PI * 2);
+    g.clip();
+    g.fillStyle = '#fff';
+    g.fillRect(rx - r, cy - r, r * 2, r * 2);
+    const q = r * 1.16;
+    g.drawImage(qrImg, rx - q / 2, cy - q / 2, q, q);
+    g.restore();
+  } else {
+    g.fillStyle = '#7d90a6';
+    g.font = `700 ${Math.round(r * 0.5)}px -apple-system, system-ui, sans-serif`;
+    g.fillText('✉', rx, cy + 2);
+  }
+
+  // SD card slot, purely decorative, tucked by the left button.
+  roundRect(g, lx + r * 1.45, cy + r * 0.1, r * 0.62, r * 0.52, 5);
+  g.fillStyle = '#c2cdda';
   g.fill();
+  g.strokeStyle = '#aab7c6';
+  g.lineWidth = 2;
+  g.stroke();
 
-  // Clock and date on the right.
+  // The clock, centre stage in quiet LCD grey.
   const now = new Date();
   const hh = now.getHours();
   const mm = String(now.getMinutes()).padStart(2, '0');
   const h12 = ((hh + 11) % 12) + 1;
-  g.fillStyle = '#3d4d60';
-  g.textAlign = 'right';
-  g.font = `700 ${Math.round(h * 0.34)}px -apple-system, system-ui, sans-serif`;
-  g.fillText(`${h12}:${mm}`, w - 60, h / 2 - h * 0.02);
-  g.font = `600 ${Math.round(h * 0.15)}px -apple-system, system-ui, sans-serif`;
-  g.fillStyle = '#7286a0';
+  const ampm = hh < 12 ? 'AM' : 'PM';
+  g.fillStyle = '#a9b6c4';
+  g.textAlign = 'center';
+  g.font = `200 ${Math.round(h * 0.37)}px -apple-system, system-ui, sans-serif`;
+  const timeStr = `${h12}:${mm}`;
+  const tw = g.measureText(timeStr).width;
+  g.fillText(timeStr, w / 2, dip + (h - dip) * 0.42);
+  g.font = `600 ${Math.round(h * 0.12)}px -apple-system, system-ui, sans-serif`;
+  g.fillText(ampm, w / 2 + tw / 2 + h * 0.09, dip + (h - dip) * 0.5);
+  g.font = `500 ${Math.round(h * 0.15)}px -apple-system, system-ui, sans-serif`;
+  g.fillStyle = '#93a2b2';
   g.fillText(
-    now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }),
-    w - 60, h / 2 + h * 0.26,
+    now.toLocaleDateString(undefined, { weekday: 'short', month: 'numeric', day: 'numeric' }),
+    w / 2, dip + (h - dip) * 0.76,
   );
 
   bar.texture.needsUpdate = true;
@@ -359,45 +440,98 @@ function drawArrow(a) {
 }
 
 // ── Hand cursor ────────────────────────────────────────────────────────────
-/** The Wii pointer: a white hand with a dark outline, drawn in code. */
-function handTexture(playerColour) {
-  return makeTexture(1.1, 1.4, (g, w, h) => {
+/**
+ * The Wii pointer: the white glove. Index finger up, three folded knuckles,
+ * a proper cuff, navy outline, soft drop shadow, and the original's slight
+ * counter-clockwise lean. Player number rides on the cuff.
+ */
+function handTexture(playerColour, playerNum = 1) {
+  return makeTexture(1.3, 1.5, (g, w, h) => {
     g.clearRect(0, 0, w, h);
-    g.translate(w * 0.5, h * 0.5);
-    const s = w * 0.0075;
+    g.translate(w * 0.5, h * 0.48);
+    const s = w * 0.0062;
     g.scale(s, s);
+    g.rotate(-0.2);
     g.lineJoin = 'round';
-    g.lineWidth = 9;
-    g.strokeStyle = '#2a3340';
-    g.fillStyle = '#ffffff';
+    g.lineCap = 'round';
 
-    // Palm plus a pointing index finger.
-    g.beginPath();
-    g.moveTo(-6, 46);
-    g.quadraticCurveTo(-34, 34, -34, 4);
-    g.lineTo(-34, -14);
-    g.quadraticCurveTo(-34, -26, -22, -26);
-    g.quadraticCurveTo(-12, -26, -12, -14);
-    g.lineTo(-12, -34);
-    g.quadraticCurveTo(-12, -62, 0, -62);
-    g.quadraticCurveTo(12, -62, 12, -34);
-    g.lineTo(12, -8);
-    g.quadraticCurveTo(20, -20, 30, -12);
-    g.quadraticCurveTo(38, -4, 30, 16);
-    g.quadraticCurveTo(22, 42, 10, 48);
-    g.closePath();
+    const glove = () => {
+      g.beginPath();
+      // Index finger, pointing up.
+      g.moveTo(-14, -10);
+      g.lineTo(-14, -52);
+      g.quadraticCurveTo(-14, -64, -3, -64);
+      g.quadraticCurveTo(8, -64, 8, -52);
+      g.lineTo(8, -22);
+      // Three folded knuckles stepping down to the right.
+      g.quadraticCurveTo(13, -30, 20, -25);
+      g.quadraticCurveTo(27, -20, 24, -12);
+      g.quadraticCurveTo(31, -14, 34, -6);
+      g.quadraticCurveTo(37, 1, 32, 6);
+      g.quadraticCurveTo(38, 8, 37, 16);
+      g.quadraticCurveTo(36, 25, 26, 30);
+      // Down to the wrist.
+      g.quadraticCurveTo(18, 36, 6, 38);
+      g.lineTo(-16, 38);
+      // Thumb bulge on the left, back up to the index.
+      g.quadraticCurveTo(-34, 32, -36, 12);
+      g.quadraticCurveTo(-37, -2, -26, -8);
+      g.quadraticCurveTo(-20, -11, -14, -10);
+      g.closePath();
+    };
+
+    // Drop shadow first, then the glove.
+    g.save();
+    g.translate(5, 8);
+    glove();
+    g.fillStyle = 'rgba(30, 48, 82, 0.22)';
     g.fill();
+    g.restore();
+
+    glove();
+    g.fillStyle = '#ffffff';
+    g.fill();
+    g.strokeStyle = '#243b63';
+    g.lineWidth = 8;
     g.stroke();
 
+    // Knuckle creases.
+    g.strokeStyle = 'rgba(36, 59, 99, 0.45)';
+    g.lineWidth = 4;
+    g.beginPath(); g.moveTo(10, -18); g.quadraticCurveTo(16, -14, 15, -7); g.stroke();
+    g.beginPath(); g.moveTo(20, -4); g.quadraticCurveTo(25, 0, 23, 7); g.stroke();
+
+    // The cuff.
+    g.beginPath();
+    roundRect(g, -26, 38, 54, 20, 9);
+    g.save();
+    g.translate(5, 8);
+    roundRect(g, -26, 38, 54, 20, 9);
+    g.fillStyle = 'rgba(30, 48, 82, 0.22)';
+    g.fill();
+    g.restore();
+    roundRect(g, -26, 38, 54, 20, 9);
+    g.fillStyle = '#ffffff';
+    g.fill();
+    g.strokeStyle = '#243b63';
+    g.lineWidth = 8;
+    g.stroke();
+
+    // Player badge on the cuff.
     g.fillStyle = playerColour;
     g.beginPath();
-    g.arc(0, 24, 11, 0, Math.PI * 2);
+    g.arc(1, 48, 9, 0, Math.PI * 2);
     g.fill();
+    g.fillStyle = '#fff';
+    g.font = '700 13px -apple-system, system-ui, sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(String(playerNum), 1, 49);
   });
 }
 
 const hand = new THREE.Mesh(
-  new THREE.PlaneGeometry(1.1, 1.4),
+  new THREE.PlaneGeometry(1.3, 1.5),
   new THREE.MeshBasicMaterial({ map: handTexture('#3c8cf0').texture, transparent: true, depthTest: false }),
 );
 hand.renderOrder = 999;
@@ -438,9 +572,9 @@ const link = new GameLink({
     const on = controller > 0;
     $('dot').classList.toggle('on', on);
     $('link-t').textContent = on ? 'remote connected' : 'no remote connected';
-    // The pairing card is scaffolding: useful until a phone is attached, pure
-    // clutter over the channel grid afterwards.
-    $('pair').classList.toggle('gone', on);
+    // The pairing panel is scaffolding: open until a phone is attached, gone
+    // the moment one is. The QR stays reachable via the bar button.
+    setQrPanel(!on);
   },
 });
 
@@ -479,6 +613,7 @@ function pressA() {
   if (launching) return;
 
   if (hovered === 'wii') { audio.play('select'); return; }
+  if (hovered === 'qr') { toggleQrPanel(); audio.play('select'); return; }
   if (hovered && hovered.dir !== undefined) { turnPage(hovered.dir); return; }
   if (hovered && hovered.game) launch(hovered);
 }
@@ -544,9 +679,13 @@ function hitTest(wx, wy) {
       && Math.abs(wx - a.mesh.position.x) < 0.55 * L.scale
       && Math.abs(wy - a.mesh.position.y) < 0.85 * L.scale) return a;
   }
-  if (wy < barMesh.position.y + BAR_H / 2 && wy > barMesh.position.y - BAR_H / 2) {
-    const bx = -barW / 2 + 1.4;
-    if (wx > bx - 1.2 && wx < bx + 2.2) return 'wii';
+  if (wy < barMesh.position.y + BAR_H / 2 + 0.2 && wy > barMesh.position.y - BAR_H / 2) {
+    // The two round bar buttons: OpenWii on the left, the pairing QR right.
+    const cy = barMesh.position.y + BAR_H / 2 - BAR_H * 0.56;
+    const cx = barW / 2 - BAR_H * 0.62;
+    const r = BAR_H * 0.48;
+    if (Math.hypot(wx + cx, wy - cy) < r) return 'wii';
+    if (Math.hypot(wx - cx, wy - cy) < r) return 'qr';
     return null;
   }
   for (const t of tiles) {
@@ -593,7 +732,7 @@ function step(now, dt) {
   // point. Both sprite and offset scale with the layout, or the cursor looks
   // enormous on a small window.
   hand.scale.setScalar(L.scale);
-  hand.position.set(p.x + 0.3 * L.scale, p.y - 0.44 * L.scale, 3);
+  hand.position.set(p.x + 0.13 * L.scale, p.y - 0.53 * L.scale, 3);
   hand.visible = !launching;
 
   if (!launching) setHover(hitTest(p.x, p.y));
@@ -623,6 +762,8 @@ function step(now, dt) {
   wiiButtonPulse += dt * 1.6;
   const wiiTarget = hovered === 'wii' ? 1 : 0;
   wiiButtonHover += (wiiTarget - wiiButtonHover) * Math.min(1, dt * 12);
+  const qrTarget = hovered === 'qr' ? 1 : 0;
+  qrHover += (qrTarget - qrHover) * Math.min(1, dt * 12);
   barClock += dt;
   if (barClock > 0.2) { barClock = 0; drawBar(); }
 
@@ -685,10 +826,21 @@ fetch('/api/games').then((r) => r.json()).then((list) => {
   refreshArrows();
 }).catch(() => { games = []; buildTiles(); refreshArrows(); });
 
+// ── Pairing QR — lives in the bar's right-hand button ──────────────────────
+function setQrPanel(open) {
+  $('qrp').classList.toggle('open', open);
+}
+function toggleQrPanel() {
+  $('qrp').classList.toggle('open');
+}
+
 fetch('/api/pairing').then((r) => r.json()).then(({ url, qr }) => {
-  $('pair-qr').src = qr;
-  $('pair-url').textContent = url;
-}).catch(() => {});
+  qrImg = new Image();
+  qrImg.onload = drawBar;
+  qrImg.src = qr;
+  $('qrp-img').src = qr;
+  $('qrp-url').textContent = url;
+}).catch(() => { $('qrp-url').textContent = 'open /controller on your phone'; });
 
 setInterval(() => {
   if (!$('debug').classList.contains('on')) return;
@@ -700,7 +852,7 @@ setInterval(() => {
     `rate        ${pointer.rateDps.yaw.toFixed(1)} / ${pointer.rateDps.pitch.toFixed(1)} deg/s`,
     `deg/screen  ${(pointer.degPerScreen / pointer.sensitivity).toFixed(0)} · gyro ${pointer.hasGyro ? 'yes' : 'NO — orientation only'}`,
     `mode        ${pointer.mode}`,
-    `hover       ${hovered === 'wii' ? 'Wii button' : hovered && hovered.dir !== undefined ? 'arrow' : hovered && hovered.game ? hovered.game.title : '—'}`,
+    `hover       ${hovered === 'wii' ? 'OpenWii button' : hovered === 'qr' ? 'QR button' : hovered && hovered.dir !== undefined ? 'arrow' : hovered && hovered.game ? hovered.game.title : '—'}`,
     `sensor      ${link.rate.toFixed(0)} Hz`,
     `channels    ${games.length}`,
   ].join('\n');
