@@ -897,10 +897,23 @@ function bombFlash() {
 }
 
 // ── Events from the logic layer ────────────────────────────────────────────
+// Browsers keep audio locked until a click or keypress on THIS page. When the
+// whole session is phone-driven, that never happens — so say so, once, at the
+// first moment sound was supposed to play.
+let soundHintShown = false;
+function maybeSoundHint() {
+  if (soundHintShown || audio.muted) return;
+  if (!audio.ctx || audio.ctx.state !== 'running') {
+    soundHintShown = true;
+    flash('click or press any key to enable sound');
+  }
+}
+
 function handleEvent(e) {
   if (e.type === 'launch') {
     audio.play('fn-throw');
   } else if (e.type === 'slice') {
+    maybeSoundHint();
     audio.play('fn-slice', { size: e.r, combo: e.combo });
     addSplat(e.x, e.y, e.kind.splat, performance.now());
     if (e.critical) {
@@ -1085,6 +1098,10 @@ setInterval(() => {
 
 resize();
 syncHud();
+// Try to unlock audio immediately: when the page was reached by clicking a
+// channel tile, the browser carries that gesture across the navigation and
+// this succeeds — sound works without ever touching the PC again.
+audio.unlock();
 // Straight into play — no calibration gate. Called here at the bottom of the
 // module: startGame touches const helpers that are in the temporal dead zone
 // until the whole module has evaluated.

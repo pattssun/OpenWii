@@ -55,6 +55,13 @@ const norm = (v) => {
   return { x: v.x / L, y: v.y / L, z: v.z / L };
 };
 
+const wrapDeg = (a) => {
+  let d = a;
+  while (d > 180) d -= 360;
+  while (d <= -180) d += 360;
+  return d;
+};
+
 /** Body-frame angular velocity between two attitudes, deg/s. Convention-free. */
 function omegaFromAttitudes(a1, a2, dt) {
   const col = (a, k) => [a[k].x, a[k].y, a[k].z];
@@ -91,6 +98,28 @@ export class Pointer {
     this.pos = { x: 0.5, y: 0.5 };
     this.rate = { x: 0, y: 0 };            // screen fractions per second
     this.rateDps = { yaw: 0, pitch: 0 };   // for the debug overlay
+
+    // ── Pose anchoring ──
+    // The cursor state is a pair of angular offsets (degrees) from the pose
+    // captured at recentre, not a raw screen position. Two consequences:
+    //  - offsets may overshoot the screen by a margin, so a slash that blows
+    //    past the edge mostly unwinds on the way back instead of un-centring
+    //    the cursor a little more every swing;
+    //  - when the hand goes still, the offsets are eased toward the beam's
+    //    actual azimuth/elevation relative to the reference pose — absolute,
+    //    drift-free quantities — so whatever error the clamps and deadzones
+    //    accumulated quietly heals. The correction targets the POSE, never
+    //    the screen centre: a deliberately held aim is not dragged (that bug
+    //    existed once already; see the git history).
+    this.yawOffDeg = 0;
+    this.pitchOffDeg = 0;
+    this.overshoot = options.overshoot ?? 0.4;   // screens past each edge
+    this.refAz = null;                           // reference pose, captured at recentre
+    this.refElev = null;
+    this.usedBeam = null;                        // which beam axis the refs describe
+    this.fwdBeam = null;                         // sticky beam choice (hysteresis)
+    this.stillMs = 0;
+    this.healTau = options.healTau ?? 1.2;       // seconds; stillness re-anchor speed
 
     // ── Ground truth ──
     this.prevAxes = null;
@@ -137,6 +166,10 @@ export class Pointer {
     this.pos.y = 0.5;
     this.rate.x = 0;
     this.rate.y = 0;
+    this.yawOffDeg = 0;
+    this.pitchOffDeg = 0;
+    this.refAz = null;      // re-captured from the next packet's attitude
+    this.refElev = null;
   }
 
   setFromMouse(nx, ny) {
@@ -144,6 +177,13 @@ export class Pointer {
     this.pos.y = clamp(ny, 0, 1);
     this.rate.x = 0;
     this.rate.y = 0;
+    // Keep the angular state consistent so a later gyro packet doesn't jump.
+    const sx = this.sensitivity * (this.invertX ? -1 : 1) || 1;
+    const sy = this.sensitivity * (this.invertY ? -1 : 1) || 1;
+    this.yawOffDeg = ((0.5 - this.pos.x) * this.degPerScreen) / sx;
+    this.pitchOffDeg = ((0.5 - this.pos.y) * this.degPerScreen * this.aspect) / sy;
+    this.refAz = null;
+    this.refElev = null;
   }
 
   /** One-line summary of the learned device map, for the debug overlay. */
@@ -284,21 +324,63 @@ export class Pointer {
     }
 
     // ── Geometry: grip-agnostic screen axes from the live attitude ──
-    // up = world-up in the body frame (world-z component of each body axis).
-    const up = { x: axes.x.z, y: axes.y.z, z: axes.z.z };
+    // Everything in ONE frame — the world's. `omega` is body-frame, so first
+    // rotate it out: axes.k is body axis k in world coords, so R·ω is just
+    // the ω-weighted sum of the axes. (The previous version crossed a
+    // world-frame beam with a body-frame up; near-flat grips hid it, but in
+    // landscape the mixed frames biased the pitch projection by >10°/s and
+    // the cursor crawled off-centre during play.)
+    const omegaW = {
+      x: axes.x.x * omega.x + axes.y.x * omega.y + axes.z.x * omega.z,
+      y: axes.x.y * omega.x + axes.y.y * omega.y + axes.z.y * omega.z,
+      z: axes.x.z * omega.x + axes.y.z * omega.y + axes.z.z * omega.z,
+    };
     // forward = whichever beam axis (top edge, or out the back) is most
-    // horizontal right now; right = forward × up. Computed per-packet, so
-    // portrait, upright and landscape grips all pitch about the user's right.
+    // horizontal; right = forward × world-up. The choice has hysteresis:
+    // in landscape both beams are near-horizontal, and a knife-edge tie-break
+    // hands a vertical swing to the beam that doesn't move with it — the
+    // cursor's vertical axis simply dies. Switch only for a decisively
+    // flatter beam; grip changes still switch, wobble never does.
     const beamY = axes.y;
     const beamZ = scale(axes.z, -1);
-    const fwd = Math.abs(beamY.z) <= Math.abs(beamZ.z) ? beamY : beamZ;
-    const right = norm(cross(fwd, up));
+    let fwd;
+    if (this.fwdBeam === 'y') fwd = Math.abs(beamZ.z) + 0.35 < Math.abs(beamY.z) ? beamZ : beamY;
+    else if (this.fwdBeam === 'z') fwd = Math.abs(beamY.z) + 0.35 < Math.abs(beamZ.z) ? beamY : beamZ;
+    else fwd = Math.abs(beamY.z) <= Math.abs(beamZ.z) ? beamY : beamZ;
+    this.fwdBeam = fwd === beamY ? 'y' : 'z';
+    const right = norm(cross(fwd, { x: 0, y: 0, z: 1 }));
 
-    let yawDps = dot(omega, up);
-    let pitchDps = dot(omega, right);
+    let yawDps = omegaW.z;
+    let pitchDps = dot(omegaW, right);
     if (Math.abs(yawDps) < deadzone) yawDps = 0;
     if (Math.abs(pitchDps) < deadzone) pitchDps = 0;
     this.rateDps = { yaw: yawDps, pitch: pitchDps };
+
+    // ── Pose anchoring: reference capture + stillness healing ──
+    // The beam's absolute azimuth/elevation in the world frame. d(az)/dt is
+    // exactly dot(ω, world-up) and d(elev)/dt ≈ dot(ω, user-right), i.e. the
+    // same quantities the offsets integrate — so (az − refAz, elev − refElev)
+    // is what the offsets WOULD be if no clamp or deadzone ever ate anything.
+    const az = Math.atan2(fwd.y, fwd.x) / DEG;
+    const elev = Math.asin(clamp(fwd.z, -1, 1)) / DEG;
+    const beamId = this.fwdBeam;
+    if (this.refAz === null || this.usedBeam !== beamId) {
+      // (Re)anchor without moving the cursor: reference = pose − current offset.
+      this.refAz = az - this.yawOffDeg;
+      this.refElev = elev - this.pitchOffDeg;
+      this.usedBeam = beamId;
+    }
+
+    // Two-speed complementary pull toward the pose: brisk once the hand has
+    // been still a moment, whisper-slow during motion (slow enough that the
+    // orientation estimate's lag distorts tracking by well under 2%, fast
+    // enough that deadzone and clamp losses can't pile up across a session).
+    const still = Math.abs(yawDps) < 2.5 && Math.abs(pitchDps) < 2.5;
+    this.stillMs = still ? this.stillMs + dt * 1000 : 0;
+    const tau = this.stillMs > 800 ? this.healTau : 8;
+    const k = clamp(dt / tau, 0, 1);
+    this.yawOffDeg += (wrapDeg(az - this.refAz) - this.yawOffDeg) * k;
+    this.pitchOffDeg += ((elev - this.refElev) - this.pitchOffDeg) * k;
 
     // Positive yaw = counterclockwise from above = pointing left → cursor
     // left; positive pitch about user-right = pointing up → cursor up.
@@ -322,7 +404,9 @@ export class Pointer {
 
   /**
    * Where to draw the cursor this frame. Integrates the current angular rate
-   * at display rate, so motion is continuous regardless of packet rate.
+   * at display rate, so motion is continuous regardless of packet rate. The
+   * integrated state is angular, bounded `overshoot` screens past each edge;
+   * the visible position is the clamped view of it.
    */
   sampleAt(now) {
     if (!this.lastDraw) this.lastDraw = now;
@@ -331,8 +415,18 @@ export class Pointer {
     if (!(dt > 0) || dt > 0.25) dt = 0;
 
     if (this.live && now - this.lastSeen < 250) {
-      this.pos.x = clamp(this.pos.x + this.rate.x * dt, 0, 1);
-      this.pos.y = clamp(this.pos.y + this.rate.y * dt, 0, 1);
+      this.yawOffDeg += this.rateDps.yaw * dt;
+      this.pitchOffDeg += this.rateDps.pitch * dt;
+
+      const sx = this.sensitivity * (this.invertX ? -1 : 1);
+      const sy = this.sensitivity * (this.invertY ? -1 : 1);
+      const capX = ((0.5 + this.overshoot) * this.degPerScreen) / Math.max(Math.abs(sx), 1e-6);
+      const capY = ((0.5 + this.overshoot) * this.degPerScreen * this.aspect) / Math.max(Math.abs(sy), 1e-6);
+      this.yawOffDeg = clamp(this.yawOffDeg, -capX, capX);
+      this.pitchOffDeg = clamp(this.pitchOffDeg, -capY, capY);
+
+      this.pos.x = clamp(0.5 - (this.yawOffDeg * sx) / this.degPerScreen, 0, 1);
+      this.pos.y = clamp(0.5 - (this.pitchOffDeg * sy) / (this.degPerScreen * this.aspect), 0, 1);
     }
     return this.pos;
   }

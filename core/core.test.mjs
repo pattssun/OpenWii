@@ -142,6 +142,7 @@ test('THE BUG: a phone reporting gyro on swapped axes still aims straight', () =
   // moved the cursor horizontally. The learned map must absorb it.
   const warm = drive({ ...WANDER, device: DEVICE.swapped, secs: 5 });
   assert.ok(warm.p.gyroTrusted, 'swapped map learned and trusted');
+  warm.p.recentre();   // isolate cross-talk from the wander's leftover offset
 
   // Now a PURE vertical swing on the same pointer.
   const { track } = drive({
@@ -311,4 +312,64 @@ test('when packets stop, the cursor freezes instead of coasting', () => {
   const later = p.sampleAt(last.ms + 1000);
   assert.ok(Math.abs(later.x - last.x) < 0.02,
     `coasted ${(Math.abs(later.x - last.x) * 100).toFixed(1)}% after packets stopped`);
+});
+
+// ── Pose anchoring: the cursor's centre must stay the phone's centre ────────
+// The complaint that drove this: constant slashing (fruit ninja) un-centred
+// the cursor until the player recentred by hand every minute. Two mechanisms
+// fix it — overshoot headroom at the edges, and stillness re-anchoring to the
+// beam's absolute pose. Trajectories here are in the user's frame; everything
+// the pointer sees is derived numerically, per the rules at the top.
+
+test('an over-swing past the edge comes back to centre', () => {
+  const p = new Pointer({});
+  drive({ ...WANDER, secs: 4, pointer: p });          // earn gyro trust first
+  assert.ok(p.gyroTrusted, 'trusted after wander');
+  p.recentre();
+  // 25° right and back — 10° past the half-screen edge (15° at sensitivity 1).
+  // The old screen-space clamp lost those 10°: the cursor came back 33% off.
+  const out = (t) => (t < 1 ? 0
+    : t < 1.5 ? -25 * ((t - 1) / 0.5)
+      : t < 2 ? -25
+        : t < 2.5 ? -25 * (1 - ((t - 2) / 0.5)) : 0);
+  const { track } = drive({ yaw: out, pitch: () => 0, secs: 3.2, pointer: p });
+  const done = track[track.length - 1];
+  assert.ok(Math.abs(done.x - 0.5) < 0.06, `returned to x=${done.x.toFixed(3)}`);
+});
+
+test('drift from a huge clamped swing heals while the hand is still', () => {
+  const p = new Pointer({});
+  drive({ ...WANDER, secs: 4, pointer: p });
+  assert.ok(p.gyroTrusted, 'trusted after wander');
+  p.recentre();
+  // 60° out and back blows even the overshoot margin — the clamp genuinely
+  // eats aim. The stillness that follows must re-anchor to the true pose.
+  const out = (t) => (t < 0.5 ? 0
+    : t < 1 ? -60 * ((t - 0.5) / 0.5)
+      : t < 1.5 ? -60
+        : t < 2 ? -60 * (1 - ((t - 1.5) / 0.5)) : 0);
+  const { track } = drive({ yaw: out, pitch: () => 0, secs: 6.5, pointer: p });
+  const justBack = track.find((r) => r.ms >= 2200);
+  const done = track[track.length - 1];
+  assert.ok(Math.abs(justBack.x - 0.5) > 0.2,
+    `sanity: the clamp cost real aim first (x=${justBack.x.toFixed(3)})`);
+  assert.ok(Math.abs(done.x - 0.5) < 0.06, `healed to x=${done.x.toFixed(3)}`);
+});
+
+test('a held aim is never dragged — healing targets the pose, not the centre', () => {
+  const p = new Pointer({});
+  drive({ ...WANDER, secs: 4, pointer: p });
+  p.recentre();
+  // Raise the aim 4° and hold it there, dead still, for seven seconds.
+  const hold = (t) => (t < 0.5 ? 0 : t < 1 ? 4 * ((t - 0.5) / 0.5) : 4);
+  const { track } = drive({ yaw: () => 0, pitch: hold, secs: 8, pointer: p });
+  // By 4s the deadzone loss from the ramp has healed; from there on the aim
+  // must sit at the pose-true position (0.5 − 4/18 = 0.278) and not creep.
+  const settled = track.find((r) => r.ms >= 4000);
+  const done = track[track.length - 1];
+  assert.ok(Math.abs(done.y - 0.5) > 0.1, `sanity: aim is off-centre (y=${done.y.toFixed(3)})`);
+  assert.ok(Math.abs(done.y - (0.5 - 4 / 18)) < 0.02,
+    `holds the pose-true position (y=${done.y.toFixed(3)})`);
+  assert.ok(Math.abs(done.y - settled.y) < 0.01,
+    `held aim crept: ${settled.y.toFixed(3)} → ${done.y.toFixed(3)}`);
 });

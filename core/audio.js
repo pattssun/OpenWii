@@ -93,6 +93,12 @@ export class AudioEngine {
 
   play(name, opts = {}) {
     if (this.muted || !this.enabled || !this.ctx) return;
+    // A context created before the user's first gesture starts suspended.
+    // Nudge it on every play: the first attempt after any interaction wins.
+    if (this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {});
+      return;
+    }
     const override = this.overrides.get(name);
     if (override) return this.playBuffer(override, opts);
     // Kick off the probe for next time; use the synth right now so the first
