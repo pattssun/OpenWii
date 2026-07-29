@@ -33,22 +33,6 @@
   .dot { width: 8px; height: 8px; border-radius: 50%; background: #b6c2d0; }
   .dot.on { background: #35d07f; }
 
-  /* Pairing panel — slides up from the QR button in the bar. */
-  #qrp {
-    position: absolute; right: 18px; bottom: 15.5%; z-index: 10;
-    display: flex; gap: 14px; align-items: center;
-    background: #ffffffe8; border: 1px solid #c9d4e0; border-radius: 18px;
-    padding: 14px; box-shadow: 0 14px 40px #33507022;
-    opacity: 0; transform: translateY(14px) scale(.96); pointer-events: none;
-    transition: opacity .3s ease, transform .3s cubic-bezier(.3,1.2,.4,1);
-  }
-  #qrp.open { opacity: 1; transform: none; pointer-events: auto; }
-  #qrp img { width: 128px; height: 128px; border-radius: 10px; background: #fff; }
-  #qrp b { display: block; font-size: 12px; margin-bottom: 4px; }
-  #qrp-url { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: #7a8b9e;
-             max-width: 190px; word-break: break-all; }
-  #qrp ol { color: #8494a7; font-size: 11px; padding-left: 16px; margin: 8px 0 0; }
-  #qrp li { margin-bottom: 2px; }
 
   #keys {
     position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%);
@@ -90,18 +74,6 @@
   </div>
 </div>
 
-<div id="qrp">
-  <img id="qrp-img" alt="Pairing QR code" />
-  <div>
-    <b>Pair your phone</b>
-    <div id="qrp-url">…</div>
-    <ol>
-      <li>Same Wi-Fi as this computer</li>
-      <li>Accept the certificate warning</li>
-      <li>Tap <strong>Enable motion sensors</strong></li>
-    </ol>
-  </div>
-</div>
 
 <div id="link"><span class="dot" id="dot"></span><span id="link-t">no remote connected</span></div>
 

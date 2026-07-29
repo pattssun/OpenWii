@@ -24,7 +24,7 @@ const TILE_W = 3.4;
 const TILE_H = 2.5;
 const GAP_X = 0.34;
 const GAP_Y = 0.30;
-const BAR_H = 1.5;            // bottom bar height in world units
+const BAR_H = 2.2;            // bottom bar height in world units — the original's bar is tall
 const VIEW_H = 12.4;          // world units the camera frames vertically
 
 // ── Scene ──────────────────────────────────────────────────────────────────
@@ -50,12 +50,12 @@ function backdropTexture() {
   c.height = 512;
   const g = c.getContext('2d');
   const grad = g.createLinearGradient(0, 0, 0, 512);
-  grad.addColorStop(0, '#f4f7fa');
-  grad.addColorStop(0.55, '#e4eaf1');
-  grad.addColorStop(1, '#ccd6e2');
+  grad.addColorStop(0, '#eef2f6');
+  grad.addColorStop(0.55, '#dbe2ea');
+  grad.addColorStop(1, '#bfcad6');
   g.fillStyle = grad;
   g.fillRect(0, 0, 4, 512);
-  g.fillStyle = 'rgba(122, 140, 160, 0.055)';
+  g.fillStyle = 'rgba(110, 128, 150, 0.07)';
   for (let y = 0; y < 512; y += 3) g.fillRect(0, y, 4, 1);
   return new THREE.CanvasTexture(c);
 }
@@ -92,70 +92,82 @@ const tiles = [];
 let games = [];
 let page = 0;
 
+/** Full-bleed art colours per channel — saturated, like real channel tiles. */
+const CHANNEL_ART = {
+  'fruit-ninja': ['#ffb347', '#e8542f'],
+  swordplay: ['#8fb3e0', '#4a6fa8'],
+  'table-tennis': ['#4cc3ab', '#238f7a'],
+  golf: ['#8fd05f', '#3f9b45'],
+  'island-flyover': ['#74cbf4', '#2f8fd0'],
+  kart: ['#f4785f', '#c93a30'],
+};
+
 function drawTileFace(g, w, h, game) {
   const pad = 10;
   g.clearRect(0, 0, w, h);
 
   if (!game) {
-    // Empty slot: the Wii shows these as recessed grey squares, and with one
-    // channel installed they're most of the grid — so they have to look right.
+    // Empty slot: a recessed grey well, clearly darker than the backdrop —
+    // on the real menu you can tell at a glance which slots hold a channel.
     roundRect(g, pad, pad, w - pad * 2, h - pad * 2, 26);
     const empty = g.createLinearGradient(0, 0, 0, h);
-    empty.addColorStop(0, '#cdd7e3');
-    empty.addColorStop(1, '#dae2ec');
+    empty.addColorStop(0, '#b6c1ce');
+    empty.addColorStop(0.14, '#c5cfda');
+    empty.addColorStop(1, '#d3dbe5');
     g.fillStyle = empty;
     g.fill();
-    g.strokeStyle = '#bcc8d7';
+    g.strokeStyle = '#a9b6c5';
     g.lineWidth = 3;
-    g.stroke();
-    // A faint top highlight sells the recessed look.
-    g.beginPath();
-    g.moveTo(pad + 26, pad + 4);
-    g.lineTo(w - pad - 26, pad + 4);
-    g.strokeStyle = 'rgba(255,255,255,0.55)';
-    g.lineWidth = 4;
     g.stroke();
     return;
   }
 
-  roundRect(g, pad, pad, w - pad * 2, h - pad * 2, 26);
-  g.fillStyle = '#ffffff';
-  g.fill();
-  g.strokeStyle = '#b9c5d4';
-  g.lineWidth = 3;
-  g.stroke();
-
-  // Channel art: the emoji, big and centred, on a soft tint.
+  // Full-bleed channel art: saturated gradient, big art, the title set right
+  // on the art in white — the way every real channel reads.
+  const [c0, c1] = CHANNEL_ART[game.slug] || ['#9db8d9', '#6f8fbc'];
   g.save();
-  roundRect(g, pad + 8, pad + 8, w - (pad + 8) * 2, h - (pad + 8) * 2 - 46, 20);
+  roundRect(g, pad, pad, w - pad * 2, h - pad * 2, 26);
   g.clip();
   const grad = g.createLinearGradient(0, 0, 0, h);
-  grad.addColorStop(0, '#eaf2fb');
-  grad.addColorStop(1, '#d8e6f6');
+  grad.addColorStop(0, c0);
+  grad.addColorStop(1, c1);
   g.fillStyle = grad;
   g.fillRect(0, 0, w, h);
-  g.font = `${Math.round(h * 0.34)}px -apple-system, "Apple Color Emoji", system-ui, sans-serif`;
+
+  g.font = `${Math.round(h * 0.42)}px -apple-system, "Apple Color Emoji", system-ui, sans-serif`;
   g.textAlign = 'center';
   g.textBaseline = 'middle';
+  g.shadowColor = 'rgba(0,0,0,0.25)';
+  g.shadowBlur = 18;
+  g.shadowOffsetY = 6;
   g.fillText(game.emoji || '🎮', w / 2, h * 0.42);
-  g.restore();
+  g.shadowColor = 'transparent';
 
-  g.fillStyle = '#33404f';
-  g.font = `600 ${Math.round(h * 0.11)}px -apple-system, system-ui, sans-serif`;
-  g.textAlign = 'center';
+  g.fillStyle = '#ffffff';
+  g.font = `700 ${Math.round(h * 0.115)}px -apple-system, system-ui, sans-serif`;
   g.textBaseline = 'alphabetic';
-  g.fillText(game.title, w / 2, h - pad - 20);
+  g.shadowColor = 'rgba(0,0,0,0.45)';
+  g.shadowBlur = 8;
+  g.shadowOffsetY = 2;
+  g.fillText(game.title, w / 2, h - pad - 18);
+  g.shadowColor = 'transparent';
 
   // Screen gloss: the diagonal sheen every real channel tile carries.
-  g.save();
-  roundRect(g, pad + 8, pad + 8, w - (pad + 8) * 2, h - (pad + 8) * 2 - 46, 20);
-  g.clip();
-  const gloss = g.createLinearGradient(0, pad, 0, h * 0.5);
-  gloss.addColorStop(0, 'rgba(255,255,255,0.5)');
+  const gloss = g.createLinearGradient(0, pad, 0, h * 0.52);
+  gloss.addColorStop(0, 'rgba(255,255,255,0.42)');
   gloss.addColorStop(1, 'rgba(255,255,255,0)');
   g.fillStyle = gloss;
-  g.fillRect(0, 0, w, h * 0.5);
+  g.fillRect(0, 0, w, h * 0.52);
   g.restore();
+
+  roundRect(g, pad, pad, w - pad * 2, h - pad * 2, 26);
+  g.strokeStyle = '#ffffff';
+  g.lineWidth = 5;
+  g.stroke();
+  roundRect(g, pad, pad, w - pad * 2, h - pad * 2, 26);
+  g.strokeStyle = '#a9b6c5';
+  g.lineWidth = 2;
+  g.stroke();
 }
 
 /**
@@ -376,26 +388,30 @@ function drawBar() {
   g.lineWidth = 2;
   g.stroke();
 
-  // The clock, centre stage in quiet LCD grey.
+  // The clock, centre stage: big, chunky, quiet LCD grey — a landmark, like
+  // the original. Shrinks on narrow bars so it never collides with the buttons.
   const now = new Date();
   const hh = now.getHours();
   const mm = String(now.getMinutes()).padStart(2, '0');
   const h12 = ((hh + 11) % 12) + 1;
   const ampm = hh < 12 ? 'AM' : 'PM';
-  g.fillStyle = '#a9b6c4';
+  const fit = clamp((w / h - 1.9) / 2.4, 0.5, 1);
+  g.fillStyle = '#aeb9c6';
   g.textAlign = 'center';
-  g.font = `200 ${Math.round(h * 0.37)}px -apple-system, system-ui, sans-serif`;
+  g.font = `500 ${Math.round(h * 0.34 * fit)}px "Helvetica Neue", -apple-system, system-ui, sans-serif`;
   const timeStr = `${h12}:${mm}`;
   const tw = g.measureText(timeStr).width;
-  g.fillText(timeStr, w / 2, dip + (h - dip) * 0.42);
-  g.font = `600 ${Math.round(h * 0.12)}px -apple-system, system-ui, sans-serif`;
-  g.fillText(ampm, w / 2 + tw / 2 + h * 0.09, dip + (h - dip) * 0.5);
-  g.font = `500 ${Math.round(h * 0.15)}px -apple-system, system-ui, sans-serif`;
-  g.fillStyle = '#93a2b2';
-  g.fillText(
-    now.toLocaleDateString(undefined, { weekday: 'short', month: 'numeric', day: 'numeric' }),
-    w / 2, dip + (h - dip) * 0.76,
-  );
+  g.fillText(timeStr, w / 2, dip + (h - dip) * 0.44);
+  g.font = `700 ${Math.round(h * 0.11 * fit)}px -apple-system, system-ui, sans-serif`;
+  g.fillText(ampm, w / 2 + tw / 2 + h * 0.1 * fit, dip + (h - dip) * 0.47);
+  if (fit > 0.62) {
+    g.font = `500 ${Math.round(h * 0.14 * fit)}px -apple-system, system-ui, sans-serif`;
+    g.fillStyle = '#98a7b6';
+    g.fillText(
+      now.toLocaleDateString(undefined, { weekday: 'short', month: 'numeric', day: 'numeric' }),
+      w / 2, dip + (h - dip) * 0.76,
+    );
+  }
 
   bar.texture.needsUpdate = true;
 }
@@ -420,21 +436,23 @@ function drawArrow(a) {
   const w = c.width;
   const h = c.height;
   g.clearRect(0, 0, w, h);
-  const alpha = a.enabled ? 0.85 + a.hover * 0.15 : 0.28;
+  if (!a.enabled) { a.texture.needsUpdate = true; return; }   // no page, no arrow
+  const alpha = 0.85 + a.hover * 0.15;
   roundRect(g, 6, 6, w - 12, h - 12, 26);
-  g.fillStyle = `rgba(255,255,255,${a.enabled ? 0.9 : 0.5})`;
+  g.fillStyle = 'rgba(255,255,255,0.92)';
   g.fill();
-  g.strokeStyle = `rgba(185,197,212,${alpha})`;
+  g.strokeStyle = `rgba(169,182,197,${alpha})`;
   g.lineWidth = 3;
   g.stroke();
+  // The solid blue triangle — the original's unmistakable page affordance.
   g.beginPath();
   const cx = w / 2;
   const cy = h / 2;
-  const s = w * 0.2;
+  const s = w * 0.27;
   if (a.dir < 0) { g.moveTo(cx + s * 0.6, cy - s); g.lineTo(cx - s * 0.6, cy); g.lineTo(cx + s * 0.6, cy + s); }
   else { g.moveTo(cx - s * 0.6, cy - s); g.lineTo(cx + s * 0.6, cy); g.lineTo(cx - s * 0.6, cy + s); }
   g.closePath();
-  g.fillStyle = a.enabled ? `rgba(70,95,125,${alpha})` : 'rgba(150,165,182,0.55)';
+  g.fillStyle = `rgba(62, 155, 226, ${alpha})`;
   g.fill();
   a.texture.needsUpdate = true;
 }
@@ -572,9 +590,6 @@ const link = new GameLink({
     const on = controller > 0;
     $('dot').classList.toggle('on', on);
     $('link-t').textContent = on ? 'remote connected' : 'no remote connected';
-    // The pairing panel is scaffolding: open until a phone is attached, gone
-    // the moment one is. The QR stays reachable via the bar button.
-    setQrPanel(!on);
   },
 });
 
@@ -612,8 +627,7 @@ function pressA() {
   ensureAudio();
   if (launching) return;
 
-  if (hovered === 'wii') { audio.play('select'); return; }
-  if (hovered === 'qr') { toggleQrPanel(); audio.play('select'); return; }
+  if (hovered === 'wii' || hovered === 'qr') { audio.play('select'); return; }
   if (hovered && hovered.dir !== undefined) { turnPage(hovered.dir); return; }
   if (hovered && hovered.game) launch(hovered);
 }
@@ -826,21 +840,12 @@ fetch('/api/games').then((r) => r.json()).then((list) => {
   refreshArrows();
 }).catch(() => { games = []; buildTiles(); refreshArrows(); });
 
-// ── Pairing QR — lives in the bar's right-hand button ──────────────────────
-function setQrPanel(open) {
-  $('qrp').classList.toggle('open', open);
-}
-function toggleQrPanel() {
-  $('qrp').classList.toggle('open');
-}
-
-fetch('/api/pairing').then((r) => r.json()).then(({ url, qr }) => {
+// ── Pairing QR — lives in the bar's right-hand button, and only there ──────
+fetch('/api/pairing').then((r) => r.json()).then(({ qr }) => {
   qrImg = new Image();
   qrImg.onload = drawBar;
   qrImg.src = qr;
-  $('qrp-img').src = qr;
-  $('qrp-url').textContent = url;
-}).catch(() => { $('qrp-url').textContent = 'open /controller on your phone'; });
+}).catch(() => {});
 
 setInterval(() => {
   if (!$('debug').classList.contains('on')) return;
