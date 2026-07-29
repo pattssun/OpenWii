@@ -315,13 +315,37 @@ made it obvious. Fixed — you now spawn facing the peak.
 
 ---
 
-## Phase 5
+## Phase 5 — Kart Time Trial
 
-Criteria firm up when reached; this is the headline bar.
+One closed circuit, three laps against the clock. Steering is `gripTilt`
+bank — hold the phone sideways like a wheel — and throttle is automatic, so
+the racing line is the whole skill. The centreline is one parametric function
+(`trackCenter`) shared by the logic, the ribbon mesh and the checkpoints. Best
+lap is recorded as keyframes and replayed as a translucent ghost kart.
 
-| Phase | Game | Headline bar |
-|---|---|---|
-| 5 | Mario Kart (time trial) | Tilt-steering that feels good enough to want a second lap. One circuit, a working lap timer, a ghost. |
+**Acceptance — met 2026-07-28.** All mechanics in `npm test`; a full race also
+driven end-to-end in the live page.
+
+| Criterion | Result |
+|---|---|
+| Tilt-steering worth a second lap (headline bar) | ✅ bank steers with speed-scaled authority (a parked kart can't pivot); no phantom turn at zero bank; the circuit has both left and right turns, so the line matters |
+| One circuit | ✅ closed loop verified (start meets end < 0.5m); off the ribbon the kart drops to crawl speed — grass is a real penalty, pinned at under half of top speed |
+| Working lap timer | ✅ five ordered checkpoints + start line per lap, so cutting doesn't count; three lap times recorded (live: 30.10 / 30.32 / 30.30), best and total on the finish card |
+| A ghost | ✅ best lap recorded at 10 Hz (259 keyframes live), replayed interpolated as a translucent kart from lap 2 on; replay verified to stay on the circuit at every 500ms offset |
+| Frame cost | ✅ 0.068 ms/frame (track ribbon, 40+ trees, two karts) — ~240× headroom |
+
+---
+
+## Roadmap complete — objective gates
+
+All five phases landed 2026-07-28. The gates set at the start, measured:
+
+| Gate | Result |
+|---|---|
+| O1 — every channel playable | ✅ 6/6: Fruit Ninja, Swordplay, Table Tennis, Golf, Island Flyover, Kart — each completable end-to-end in the live page, phone or desk fallback |
+| O5 — keyboard-free | ✅ every game starts and restarts from the phone's A/B buttons; keyboard is a desk-testing fallback only |
+| O6 — frame cost | ✅ worst channel 1.15 ms/frame (golf terrain), best 0.068 ms (kart) — every channel has >14× headroom at 60fps |
+| Test suite | ✅ 62 tests, all logic driven headless with manual clocks; every gyro test signal derived numerically, never from the code under test |
 
 ## Risks
 

@@ -19,10 +19,11 @@ npm start
 1. Open **https://localhost:8443/** on the PC — the launcher shows a QR code.
 2. Scan it with your phone (same Wi-Fi). Accept the certificate warning.
 3. Tap **Enable motion sensors**.
-4. Pick a game. Calibration runs, then you play.
+4. Pick a game and play. No calibration step — the pointer learns your
+   phone's gyroscope conventions from the first second of motion.
 
 Grip the phone however is comfortable — flat in your palm like a Wii remote, or
-upright like a TV remote. Calibration works out which way you're pointing.
+upright like a TV remote.
 
 ### Why HTTPS — this is the #1 thing that breaks
 
@@ -45,6 +46,11 @@ actual phone control.
 | Game | | |
 | --- | --- | --- |
 | 🍉 **Fruit Ninja** | Swing the phone like a sword. Slice fruit, dodge bombs. | [`games/fruit-ninja`](games/fruit-ninja) |
+| ⚔️ **Swordplay** | Duel a fencer foe — swing to strike, hold your blade to block. | [`games/swordplay`](games/swordplay) |
+| 🏓 **Table Tennis** | Track the ball, swing at contact for pace. First to 11. | [`games/table-tennis`](games/table-tennis) |
+| ⛳ **Golf** | Drive, approach, putt. Swing hard off the tee, soft on the green. | [`games/golf`](games/golf) |
+| 🛩 **Island Flyover** | Hold the phone flat like a paper plane and thread 20 rings. | [`games/island-flyover`](games/island-flyover) |
+| 🏎 **Kart Time Trial** | Tilt to steer. Three laps, one clock, and your own ghost. | [`games/kart`](games/kart) |
 
 ## Adding a game
 
