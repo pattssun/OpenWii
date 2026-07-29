@@ -463,7 +463,7 @@ function drawArrow(a) {
 const handTex = new THREE.TextureLoader().load('/assets/hand-p1.png');
 handTex.colorSpace = THREE.SRGBColorSpace;
 handTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-const HAND_SIZE = 2.0;                 // square sprite, world units at scale 1
+const HAND_SIZE = 1.6;                 // square sprite, world units at scale 1
 // Where the fingertip sits inside the image (fractions from the top-left).
 const HAND_TIP = { x: 0.32, y: 0.09 };
 const hand = new THREE.Mesh(
