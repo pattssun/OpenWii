@@ -18,18 +18,12 @@
   }
   #app {
     height: 100%;
-    padding: max(10px, env(safe-area-inset-top)) 16px max(10px, env(safe-area-inset-bottom));
-    display: flex; flex-direction: column; gap: 10px;
+    padding: max(12px, env(safe-area-inset-top)) 14px max(12px, env(safe-area-inset-bottom));
+    display: flex; flex-direction: column;
   }
 
-  /* ── Slim status bar ─────────────────────────────────────────────────── */
-  #topbar {
-    display: flex; align-items: center; gap: 9px; font-size: 12px; color: #8b95ad;
-    padding: 7px 12px; background: #ffffff10; border: 1px solid #ffffff14;
-    border-radius: 999px; flex: none;
-  }
-  #topbar #player { color: #7fb7ff; font-weight: 600; }
-  #hz { margin-left: auto; font-variant-numeric: tabular-nums; }
+  /* All status lives ON the remote (LEDs, power glow) or in the button-2
+     sheet — the screen holds nothing but the remote itself. */
   .dot { width: 8px; height: 8px; border-radius: 50%; background: #4b5468; flex: none; }
   .dot.on  { background: #35d07f; box-shadow: 0 0 10px #35d07f88; }
   .dot.err { background: #ff5f6d; }
@@ -53,15 +47,21 @@
   button { font: inherit; color: inherit; border: none; background: none; padding: 0; }
   button:active { }
 
-  /* Power */
+  /* Power — doubles as the connection light: soft blue when linked to the
+     PC, red when the server is unreachable. */
   #row-top { width: 100%; display: flex; flex: none; }
   #power {
     width: clamp(32px, 5vh, 40px); height: clamp(32px, 5vh, 40px); border-radius: 50%;
     background: linear-gradient(180deg, #3a414b, #262c34);
     color: #cfd6de; font-size: 16px;
     box-shadow: inset 0 1px 0 #ffffff22, 0 2px 5px #0004;
+    transition: box-shadow .4s ease, color .4s ease;
   }
   #power:active { transform: translateY(1px); filter: brightness(1.25); }
+  #power.linked { color: #7fc4ff;
+    box-shadow: inset 0 1px 0 #ffffff22, 0 2px 5px #0004, 0 0 14px #45a6ff66; }
+  #power.err { color: #ff8d85;
+    box-shadow: inset 0 1px 0 #ffffff22, 0 2px 5px #0004, 0 0 14px #ff5f6d88; }
 
   /* D-pad: a solid cross. Sized by viewport height so short phones still fit
      the whole face; segments are percentages of the pad, not pixels. */
@@ -162,12 +162,23 @@
     20% { background: #45c1ff; box-shadow: 0 0 9px #45c1ffcc; }
   }
 
-  #hint {
-    text-align: center; font-size: 11px; color: #6b7890; flex: none; letter-spacing: .01em;
-  }
   /* Short phones: every pixel goes to the buttons. */
   @media (max-height: 700px) {
-    #hint, #brand { display: none; }
+    #brand { display: none; }
+  }
+  /* Landscape / very short: drop the decorative rows, tuck 1 and 2 side by
+     side, and let the big controls shrink further. */
+  @media (max-height: 560px) {
+    #speaker, #brand { display: none; }
+    #remote { gap: 2px; padding: 8px 24px 6px; }
+    #ones { flex-direction: row; gap: 10px; }
+    #dpad { width: clamp(64px, 15vh, 128px); height: clamp(64px, 15vh, 128px); }
+    #btn-a { width: clamp(50px, 12vh, 96px); height: clamp(50px, 12vh, 96px); }
+    #btn-b { height: clamp(30px, 6vh, 46px); }
+    #power { width: 30px; height: 30px; }
+    .num { width: clamp(30px, 5.8vh, 46px); height: clamp(30px, 5.8vh, 46px); }
+    .pill { width: clamp(28px, 5.4vh, 42px); height: clamp(28px, 5.4vh, 42px); }
+    #btn-home { width: clamp(32px, 6.4vh, 50px); height: clamp(32px, 6.4vh, 50px); }
   }
 
   /* ── Wake gate ───────────────────────────────────────────────────────── */
@@ -216,12 +227,6 @@
 </head>
 <body>
 <div id="app">
-  <div id="topbar">
-    <span class="dot" id="dot-net"></span><span id="net">connecting…</span>
-    <span id="player" class="hide">P1</span>
-    <span id="hz">0 Hz</span>
-  </div>
-
   <div id="stage">
     <div id="remote" class="asleep">
       <div id="row-top"><button id="power" aria-label="power">⏻</button></div>
@@ -266,8 +271,6 @@
     </div>
   </div>
 
-  <div id="hint"><b>A</b> select · <b>B</b> back · <b>⌂</b> menu · <b>−/+</b> speed · <b>1</b> re-centre · <b>2</b> status</div>
-
   <div id="gate">
     <div class="card">
       <h1>🕹 Wake the remote</h1>
@@ -278,7 +281,16 @@
 
   <div id="sheet">
     <h2>Status</h2>
+    <div class="muted" style="display:flex;align-items:center;gap:8px;">
+      <span class="dot" id="dot-net"></span><span id="net">connecting…</span>
+      <span id="player" class="hide" style="color:#7fb7ff;font-weight:600;">P1</span>
+      <span id="hz" style="margin-left:auto;font-variant-numeric:tabular-nums;">0 Hz</span>
+    </div>
     <div class="muted" id="rates">sensor 0 Hz · sent 0 Hz · offline</div>
+    <div class="muted" style="margin-top:10px;font-size:11px;">
+      <b>A</b> select · <b>B</b> back · <b>⌂</b> menu · <b>−/+</b> speed ·
+      <b>1</b> re-centre · <b>2</b> this sheet
+    </div>
     <div id="diag" class="hide">
       <b id="diag-title">⚠️ No sensor data</b>
       <div class="muted" id="diag-body"></div>

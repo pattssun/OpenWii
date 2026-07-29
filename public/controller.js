@@ -91,9 +91,15 @@ function speakerTalk(ms = 220) {
 }
 
 // ── Connection status ──────────────────────────────────────────────────────
+// Text detail lives in the button-2 sheet; the remote itself carries the
+// state like the real one did — player LEDs blink while pairing and go
+// solid on a slot, and the power button glows blue when linked to the PC,
+// red when the server is unreachable.
 function setNet(text, state) {
   els.net.textContent = text;
   els.dotNet.className = `dot ${state || ''}`;
+  els.power.classList.toggle('err', state === 'err');
+  els.power.classList.toggle('linked', state !== 'err' && gameConnected);
 }
 
 function syncLeds() {
