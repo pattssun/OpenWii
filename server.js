@@ -12,6 +12,7 @@
  * phone's orientation stream reaches the PC with as few hops as possible.
  */
 
+const { exec } = require('child_process');
 const express = require('express');
 const fs = require('fs');
 const http = require('http');
@@ -231,6 +232,18 @@ server.listen(PORT, '0.0.0.0', () => {
   } else {
     console.log('\n  ⚠  Self-signed cert: the phone will show a warning once.');
     console.log('     Tap Advanced → Proceed. Sensors need HTTPS to unlock.');
+  }
+
+  // One command, whole console: npm start also opens the TV browser — its
+  // own Chrome profile so the autoplay flag genuinely applies (handing the
+  // URL to an already-running Chrome silently drops process flags).
+  // HTTP dev mode and NO_OPEN=1 skip this.
+  if (tls && process.platform === 'darwin' && !process.env.NO_OPEN) {
+    exec('open -na "Google Chrome" --args'
+      + ' --user-data-dir="$HOME/.openwii-chrome" --no-first-run --no-default-browser-check'
+      + ` --autoplay-policy=no-user-gesture-required --new-window https://localhost:${PORT}/`);
+    console.log('\n  📺 Opening the console in Chrome (autoplay enabled)…');
+    console.log('     Skip with NO_OPEN=1 npm start.');
   }
   console.log(`${line}\n`);
 });

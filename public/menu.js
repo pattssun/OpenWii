@@ -639,13 +639,16 @@ function ensureAudio() {
     // of the session uses the synth fallback while the file is still being
     // fetched — the one play the user most notices.
     for (const cue of ['menu-hover', 'menu-select', 'menu-back']) audio.loadOverride(cue);
-    if (!audio.music) audio.startMusic();
+    // Never (re)start the theme once a launch is underway — a retry landing
+    // after launch()'s stopMusic() brought the music back mid-banner.
+    if (!audio.music && !launching) audio.startMusic();
   });
 }
 ensureAudio();
 audio.startMusic();   // the element route may be allowed with no gesture at all
 let soundHintOn = false;
 const audioRetry = setInterval(() => {
+  if (launching) { clearInterval(audioRetry); return; }   // never restart mid-launch
   audio.startMusic();               // retries a policy-blocked element too
   ensureAudio();                    // unlocks the cue engine when allowed
   const musicOn = audio.music && (!audio.music.el || !audio.music.el.paused);
@@ -731,8 +734,7 @@ function tileScreenRect(tile) {
 
 function launch(tile) {
   launching = { tile, t: 0 };
-  audio.play('menu-select');       // the click of choosing it...
-  audio.play('channel-launch');    // ...under the banner's rising fanfare
+  audio.play('menu-select');       // the click of choosing it — nothing else
   audio.stopMusic();
   link.feedback({ type: 'launch', game: tile.game.slug });
 
