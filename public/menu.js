@@ -104,6 +104,44 @@ const CHANNEL_ART = {
   kart: ['#f4785f', '#c93a30'],
 };
 
+/**
+ * Measure an emoji's painted extents by rendering it offscreen and scanning
+ * pixel alpha. Returns the ink centre's offset from the draw origin (centre
+ * aligned, middle baseline) and the ink height. Cached per emoji and size.
+ */
+const inkCache = new Map();
+function emojiInk(em, px) {
+  const key = `${em}:${px}`;
+  let ink = inkCache.get(key);
+  if (ink) return ink;
+  const s = Math.ceil(px * 1.6);
+  const c = document.createElement('canvas');
+  c.width = s;
+  c.height = s;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.font = `${px}px -apple-system, "Apple Color Emoji", system-ui, sans-serif`;
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText(em, s / 2, s / 2);
+  const d = g.getImageData(0, 0, s, s).data;
+  let x0 = s; let x1 = -1; let y0 = s; let y1 = -1;
+  for (let y = 0; y < s; y += 1) {
+    for (let x = 0; x < s; x += 1) {
+      if (d[(y * s + x) * 4 + 3] > 16) {
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    }
+  }
+  ink = x1 < 0
+    ? { dx: 0, dy: 0, h: px }        // glyph missing: neutral fallback
+    : { dx: (x0 + x1) / 2 - s / 2, dy: (y0 + y1) / 2 - s / 2, h: y1 - y0 + 1 };
+  inkCache.set(key, ink);
+  return ink;
+}
+
 function drawTileFace(g, w, h, game) {
   const pad = 10;
   g.clearRect(0, 0, w, h);
@@ -136,33 +174,34 @@ function drawTileFace(g, w, h, game) {
   g.fillStyle = grad;
   g.fillRect(0, 0, w, h);
 
-  // Centre the emoji by its INK, not its glyph box: emoji art routinely sits
-  // off-centre inside the glyph's advance width (the watermelon leans left,
-  // the plane leans left), so advance-centred fillText looks misaligned.
-  // Measure the actual painted extents and centre those in the art area
-  // between the top padding and the title.
-  g.font = `${Math.round(h * 0.42)}px -apple-system, "Apple Color Emoji", system-ui, sans-serif`;
+  // Centre the emoji + title as ONE group, using the emoji's PIXEL ink.
+  // Font metrics lie about colour emoji (some browsers report the em box or
+  // nothing), and emoji art routinely sits off-centre inside its own glyph —
+  // so the icon is rendered once offscreen, its painted pixels measured, and
+  // the icon+gap+title block is centred in the tile from those real extents.
+  const em = game.emoji || '🎮';
+  const px = Math.round(h * 0.42);
+  const ink = emojiInk(em, px);
+  const titleH = Math.round(h * 0.115);
+  const gapH = Math.round(h * 0.055);
+  const groupTop = pad + (h - pad * 2 - (ink.h + gapH + titleH)) / 2;
+
+  g.font = `${px}px -apple-system, "Apple Color Emoji", system-ui, sans-serif`;
   g.textAlign = 'center';
   g.textBaseline = 'middle';
-  const em = game.emoji || '🎮';
-  const met = g.measureText(em);
-  const inkDx = ((met.actualBoundingBoxRight ?? 0) - (met.actualBoundingBoxLeft ?? 0)) / 2;
-  const inkDy = ((met.actualBoundingBoxDescent ?? 0) - (met.actualBoundingBoxAscent ?? 0)) / 2;
-  const titleTop = (h - pad - 18) - h * 0.115;
-  const artCy = (pad + titleTop) / 2;
   g.shadowColor = 'rgba(0,0,0,0.25)';
   g.shadowBlur = 18;
   g.shadowOffsetY = 6;
-  g.fillText(em, w / 2 - inkDx, artCy - inkDy);
+  g.fillText(em, w / 2 - ink.dx, groupTop + ink.h / 2 - ink.dy);
   g.shadowColor = 'transparent';
 
   g.fillStyle = '#ffffff';
-  g.font = `700 ${Math.round(h * 0.115)}px -apple-system, system-ui, sans-serif`;
+  g.font = `700 ${titleH}px -apple-system, system-ui, sans-serif`;
   g.textBaseline = 'alphabetic';
   g.shadowColor = 'rgba(0,0,0,0.45)';
   g.shadowBlur = 8;
   g.shadowOffsetY = 2;
-  g.fillText(game.title, w / 2, h - pad - 18);
+  g.fillText(game.title, w / 2, groupTop + ink.h + gapH + titleH * 0.8);
   g.shadowColor = 'transparent';
 
   // Screen gloss: the diagonal sheen every real channel tile carries.

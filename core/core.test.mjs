@@ -63,9 +63,12 @@ const LANDSCAPE = quatFromEuler(0, 0, 90);
  * (as quaternions) are lagged by `lagMs`; the gyro is derived from the true
  * attitude and passed through the device model.
  */
+// Every real pipeline delays packets (sensor cadence + LAN + socket): 25ms is
+// a measured-typical default. A zero-delay harness once made honest display
+// prediction look like pure overshoot — and before that, hid latency wins.
 function drive({
   yaw = () => 0, pitch = () => 0, grip = FLAT, device = DEVICE.spec,
-  lagMs = 60, secs = 6, pointer = null, packetDelayMs = 0,
+  lagMs = 60, secs = 6, pointer = null, packetDelayMs = 25,
 }) {
   const p = pointer || new Pointer({});
   const attitude = (t) => mul(mul(axisQ(2, yaw(t)), axisQ(0, pitch(t))), grip);
@@ -433,4 +436,43 @@ test('display lead cuts tracking delay during swings, and only during swings', (
     maxDiff = Math.max(maxDiff, Math.abs(slowOn.track[i].x - slowOff.track[i].x));
   }
   assert.ok(maxDiff < 1e-9, `no lead below the motion gate (max diff ${maxDiff.toExponential(1)})`);
+});
+
+test('display lead does not shimmer: noisy gyro, smooth cursor', () => {
+  // Raw per-packet rate noise multiplied by the lead horizon lands straight
+  // in the drawn position as frame-to-frame shimmer — the regression that
+  // shipped and was felt immediately. The lead must extrapolate a smoothed
+  // rate: with a noisy gyro, lead-on frame-to-frame roughness must stay
+  // close to lead-off. Roughness = mean |second difference| of x, which a
+  // constant-rate sweep keeps near zero except for noise.
+  let seed = 11;
+  const rnd = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff - 0.5;
+  };
+  const noisy = (w) => [w.x + rnd() * 10, w.y + rnd() * 10, w.z + rnd() * 10];
+  // ±10° at 0.7Hz: rates peak ~44°/s (lead fully engaged), cursor on-screen.
+  const sweep = {
+    yaw: (t) => 10 * Math.sin(2 * Math.PI * 0.7 * t),
+    secs: 6, device: noisy, packetDelayMs: 30,
+  };
+
+  const roughness = (track) => {
+    let sum = 0;
+    let n = 0;
+    for (let i = 2; i < track.length; i += 1) {
+      if (track[i].ms < 3000) continue;   // trust earned, ramp fully on
+      sum += Math.abs(track[i].x - 2 * track[i - 1].x + track[i - 2].x);
+      n += 1;
+    }
+    return sum / n;
+  };
+  seed = 11;
+  const on = drive({ ...sweep });
+  seed = 11;
+  const off = drive({ ...sweep, pointer: new Pointer({ displayLead: false }) });
+  const rOn = roughness(on.track);
+  const rOff = roughness(off.track);
+  assert.ok(rOn < rOff * 1.35,
+    `lead adds no shimmer: ${(rOn * 1e4).toFixed(2)} vs ${(rOff * 1e4).toFixed(2)} (×1e-4/frame²)`);
 });

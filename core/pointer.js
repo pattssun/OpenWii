@@ -104,6 +104,17 @@ export class Pointer {
     // half a display frame ahead. Toggleable for A/B tests.
     this.displayLead = options.displayLead ?? true;
     this.emaPacketDt = 1 / 60;             // measured packet cadence, seconds
+    // The lead extrapolates a SMOOTHED rate, never the raw packet rate: raw
+    // gyro noise multiplied by the lead horizon lands directly in the drawn
+    // position as frame-to-frame shimmer. The EMA delays the rate estimate
+    // by ~its own tau, so the horizon is extended by the same amount — same
+    // latency win, no shimmer.
+    // Tuned by parameter sweep (see the lead tests): 15ms keeps the EMA's
+    // group delay small enough that the horizon extension genuinely repays
+    // it; 30ms ate the entire latency win at swing frequencies.
+    this.leadTau = 0.015;
+    this.emaRate = { x: 0, y: 0 };         // smoothed screen-rate for the lead
+    this.emaAbsDps = 0;                    // smoothed |rate|, gates the ramp
 
     // ── Pose anchoring ──
     // The cursor state is a pair of angular offsets (degrees) from the pose
@@ -411,6 +422,11 @@ export class Pointer {
     const sy = this.sensitivity * (this.invertY ? -1 : 1);
     this.rate.x = (-yawDps / this.degPerScreen) * sx;
     this.rate.y = (-pitchDps / (this.degPerScreen * this.aspect)) * sy;
+
+    const kR = clamp(dt / this.leadTau, 0, 1);
+    this.emaRate.x += (this.rate.x - this.emaRate.x) * kR;
+    this.emaRate.y += (this.rate.y - this.emaRate.y) * kR;
+    this.emaAbsDps += (Math.max(Math.abs(yawDps), Math.abs(pitchDps)) - this.emaAbsDps) * kR;
   }
 
   /** Reported gyro → true body rates through the learned map. */
@@ -458,12 +474,20 @@ export class Pointer {
       // it is proportional to the current rate it collapses to zero the
       // instant the hand stops — no overshoot to unwind.
       if (this.displayLead) {
-        const m = Math.max(Math.abs(this.rateDps.yaw), Math.abs(this.rateDps.pitch));
-        const ramp = clamp((m - 15) / 25, 0, 1);
+        // A gentle ramp (full lead only at real swing speeds) measured BOTH
+        // best-tracking and least-shimmer in the sweep — noise matters less
+        // relative to motion the faster the hand moves.
+        const ramp = clamp((this.emaAbsDps - 18) / 32, 0, 1);
         if (ramp > 0) {
-          const lead = clamp(this.emaPacketDt + 0.008, 0.012, 0.035) * ramp;
-          this.pos.x = clamp(this.pos.x + this.rate.x * lead, 0, 1);
-          this.pos.y = clamp(this.pos.y + this.rate.y * lead, 0, 1);
+          // Horizon = pipeline delay + the smoothing EMA's own delay, capped
+          // so slash reversals (high angular acceleration) can't overshoot
+          // visibly.
+          const horizon = Math.min(
+            clamp(this.emaPacketDt + 0.008, 0.012, 0.035) + this.leadTau, 0.055,
+          );
+          const lead = horizon * ramp;
+          this.pos.x = clamp(this.pos.x + this.emaRate.x * lead, 0, 1);
+          this.pos.y = clamp(this.pos.y + this.emaRate.y * lead, 0, 1);
         }
       }
     }
