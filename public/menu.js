@@ -731,7 +731,8 @@ function tileScreenRect(tile) {
 
 function launch(tile) {
   launching = { tile, t: 0 };
-  audio.play('channel-launch');
+  audio.play('menu-select');       // the click of choosing it...
+  audio.play('channel-launch');    // ...under the banner's rising fanfare
   audio.stopMusic();
   link.feedback({ type: 'launch', game: tile.game.slug });
 
@@ -988,10 +989,13 @@ setInterval(() => {
 // chime rings) right as the menu appears, not whenever a retry timer lands.
 {
   let fromHome = false;
+  let homeChimed = false;
   try {
     const homeAt = Number(sessionStorage.getItem('openwii.home') || 0);
     sessionStorage.removeItem('openwii.home');
     fromHome = Date.now() - homeAt < 4000;
+    homeChimed = sessionStorage.getItem('openwii.homeChimed') === '1';
+    sessionStorage.removeItem('openwii.homeChimed');
   } catch { /* storage unavailable */ }
 
   const veil = document.createElement('div');
@@ -1004,9 +1008,9 @@ setInterval(() => {
     audio.startMusic();              // element route: may start with no gesture
     audio.unlock().then((ok) => {
       if (!ok) return;               // policy still blocks: the retry loop takes over
-      // The chime waits for its sampled file so the real HOME sound rings,
-      // not the synth stand-in.
-      if (fromHome) audio.loadOverride('menu-back').then(() => audio.play('menu-back'));
+      // Fallback chime: only when the game page couldn't ring it itself
+      // (its audio was still policy-blocked at the moment HOME was pressed).
+      if (fromHome && !homeChimed) audio.loadOverride('menu-back').then(() => audio.play('menu-back'));
       audio.startMusic();
     });
   }));

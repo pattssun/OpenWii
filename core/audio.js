@@ -201,6 +201,18 @@ export class AudioEngine {
       el.loop = true;
       // Matches the Web Audio route's effective level: musicGain × master.
       el.volume = Math.min(1, 0.42 * this.volume);
+      // The provided recording is silent for its first second (measured:
+      // audible from ~1.0s). Start past the dead air — and re-skip it on
+      // every loop wrap, since loop always rewinds to 0.
+      const LEAD_SKIP = 0.95;
+      el.addEventListener('loadedmetadata', () => {
+        try { el.currentTime = LEAD_SKIP; } catch { /* not seekable yet */ }
+      }, { once: true });
+      el.addEventListener('timeupdate', () => {
+        if (el.currentTime < LEAD_SKIP - 0.1) {
+          try { el.currentTime = LEAD_SKIP; } catch { /* ignore */ }
+        }
+      });
       el.addEventListener('error', () => {
         if (this.music && this.music.el === el) this.music = null;
         tryExt(i + 1);

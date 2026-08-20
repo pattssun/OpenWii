@@ -8,23 +8,30 @@
  * continuous motion across the page navigation, with no flash between.
  */
 /**
- * Leave a game for the menu, the console way: the game fades to the menu's
- * silver, and the menu (see menu.js) fades in from the same silver with the
- * HOME chime and the theme starting together. The chime deliberately rings
- * on the MENU side: a game page's audio context is usually still suspended
- * (no local gesture ever happened there), so playing here was silently
- * dropped — and navigation would cut it off anyway.
+ * Leave a game for the menu, the console way: the HOME chime rings the
+ * instant the button lands (when this page's audio is allowed to speak —
+ * the sampled sound's audible content fits inside the fade window), the
+ * game fades to the menu's silver, and the menu fades in from the same
+ * silver. If this page's audio was still policy-blocked, a flag tells the
+ * menu to ring the chime on arrival instead — one chime either way.
  */
-export function goHome() {
+export function goHome(audio) {
   if (goHome.leaving) return;
   goHome.leaving = true;
+  if (audio) {
+    audio.unlock().then((ok) => {
+      if (!ok) return;
+      audio.loadOverride('menu-back').then(() => audio.play('menu-back'));
+      try { sessionStorage.setItem('openwii.homeChimed', '1'); } catch { /* fine */ }
+    }).catch(() => {});
+  }
   const el = document.createElement('div');
   el.style.cssText = 'position:fixed;inset:0;background:#e4eaf1;opacity:0;'
     + 'transition:opacity .5s ease;z-index:999;pointer-events:none;';
   document.body.appendChild(el);
   requestAnimationFrame(() => { el.style.opacity = '1'; });
   try { sessionStorage.setItem('openwii.home', String(Date.now())); } catch { /* fine */ }
-  setTimeout(() => { window.location.href = '/'; }, 800);
+  setTimeout(() => { window.location.href = '/'; }, 950);
 }
 
 export function consumeLaunchSplash() {
