@@ -113,7 +113,9 @@ export class Pointer {
     //    existed once already; see the git history).
     this.yawOffDeg = 0;
     this.pitchOffDeg = 0;
-    this.overshoot = options.overshoot ?? 0.4;   // screens past each edge
+    // Small: overshoot is dead travel on the way back from an edge slam, and
+    // it reads as lag. The pose-healing below repays clamp losses instead.
+    this.overshoot = options.overshoot ?? 0.15;  // screens past each edge
     this.refAz = null;                           // reference pose, captured at recentre
     this.refElev = null;
     this.usedBeam = null;                        // which beam axis the refs describe
@@ -371,30 +373,25 @@ export class Pointer {
       this.usedBeam = beamId;
     }
 
-    // Complementary pull toward the pose, at three speeds:
-    //  - merely-aiming (< 8 dps for 400ms): brisk. Real play — fruit ninja
-    //    especially — almost never contains true stillness, but it is full
-    //    of these little aiming pauses between slashes, and they're where
-    //    drift has to be repaid or it piles up until the player recentres
-    //    by hand (the exact complaint that shaped this block).
-    //  - calm-but-moving with a PROVABLY wrong cursor: speed scales with the
-    //    size of the error, so one clamped 60° slash is repaid in a second
-    //    or two of ordinary aiming instead of eight. Gated to moderate rates:
-    //    during a fast slash the lagged pose target trails the true pose by
-    //    tens of degrees, and correcting hard against that would fight the
-    //    swing itself.
-    //  - otherwise: whisper-slow, so the orientation estimate's lag distorts
-    //    tracking by well under 2%.
+    // Complementary pull toward the pose. Two rules, both tuned so the pull
+    // is never felt as drag during deliberate motion (the pose target lags
+    // the true pose by the orientation estimate's ~60-100ms):
+    //  - aiming heal: engages in the little pauses between slashes (< 12°/s
+    //    for 400ms) — where drift actually gets repaid in real play — with a
+    //    speed that tapers as the hand speeds up, so pulling toward the
+    //    slightly-stale pose stays under ~2% of the motion itself.
+    //  - provable-error heal: when the cursor disagrees with the pose by
+    //    clearly more than the lag phantom (threshold scales with rate), a
+    //    flat fast lane (τ 1.5s) repays a clamped slash within a couple of
+    //    seconds. Gated below 40°/s: mid-slash, the stale target trails by
+    //    tens of degrees and correcting against it would fight the swing.
     const errX = wrapDeg(az - this.refAz) - this.yawOffDeg;
     const errY = (elev - this.refElev) - this.pitchOffDeg;
     const err = Math.hypot(errX, errY);
-    const still = Math.abs(yawDps) < 12 && Math.abs(pitchDps) < 12;
-    const calm = Math.abs(yawDps) < 40 && Math.abs(pitchDps) < 40;
-    this.stillMs = still ? this.stillMs + dt * 1000 : 0;
-    let tau = this.stillMs > 400 ? this.healTau : 8;
-    // At moderate rates the lag-induced phantom error stays under ~4°, so a
-    // 6° threshold only ever fast-heals genuine loss.
-    if (calm && err > 6) tau = Math.min(tau, clamp(48 / err, 0.8, 8));
+    const rateNow = Math.max(Math.abs(yawDps), Math.abs(pitchDps));
+    this.stillMs = rateNow < 12 ? this.stillMs + dt * 1000 : 0;
+    let tau = this.stillMs > 400 ? this.healTau * (1 + 3 * (rateNow / 12)) : 8;
+    if (rateNow < 40 && err > 3 + rateNow * 0.12) tau = Math.min(tau, 1.5);
     const k = clamp(dt / tau, 0, 1);
     this.yawOffDeg += errX * k;
     this.pitchOffDeg += errY * k;

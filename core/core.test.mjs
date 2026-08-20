@@ -327,12 +327,14 @@ test('an over-swing past the edge comes back to centre', () => {
   assert.ok(p.gyroTrusted, 'trusted after wander');
   p.recentre();
   // 25° right and back — 10° past the half-screen edge (15° at sensitivity 1).
-  // The old screen-space clamp lost those 10°: the cursor came back 33% off.
+  // The old screen-space clamp lost those 10° forever: the cursor came back
+  // 33% off and stayed there. Now the overshoot buffer absorbs part and the
+  // provable-error heal repays the rest within about a second.
   const out = (t) => (t < 1 ? 0
     : t < 1.5 ? -25 * ((t - 1) / 0.5)
       : t < 2 ? -25
         : t < 2.5 ? -25 * (1 - ((t - 2) / 0.5)) : 0);
-  const { track } = drive({ yaw: out, pitch: () => 0, secs: 3.2, pointer: p });
+  const { track } = drive({ yaw: out, pitch: () => 0, secs: 4.5, pointer: p });
   const done = track[track.length - 1];
   assert.ok(Math.abs(done.x - 0.5) < 0.06, `returned to x=${done.x.toFixed(3)}`);
 });
