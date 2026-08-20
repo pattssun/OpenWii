@@ -109,10 +109,11 @@ export class Pointer {
     // position as frame-to-frame shimmer. The EMA delays the rate estimate
     // by ~its own tau, so the horizon is extended by the same amount — same
     // latency win, no shimmer.
-    // Tuned by parameter sweep (see the lead tests): 15ms keeps the EMA's
-    // group delay small enough that the horizon extension genuinely repays
-    // it; 30ms ate the entire latency win at swing frequencies.
-    this.leadTau = 0.015;
+    // Tuned by parameter sweep with an EXACT exponential kernel (see the
+    // lead tests). The first "tuning" used a clamped kernel that saturated
+    // at packet cadence — its winning tau was secretly no smoothing at all,
+    // which shipped raw gyro noise into the lead and jittered fast swings.
+    this.leadTau = 0.02;
     this.emaRate = { x: 0, y: 0 };         // smoothed screen-rate for the lead
     this.emaAbsDps = 0;                    // smoothed |rate|, gates the ramp
 
@@ -410,7 +411,10 @@ export class Pointer {
     this.stillMs = rateNow < 12 ? this.stillMs + dt * 1000 : 0;
     let tau = this.stillMs > 400 ? this.healTau * (1 + 3 * (rateNow / 12)) : 8;
     if (rateNow < 40 && err > 3 + rateNow * 0.12) tau = Math.min(tau, 1.5);
-    const k = clamp(dt / tau, 0, 1);
+    // No healing at all during fast motion: mid-slash, the pose target lags
+    // the true pose by tens of degrees, and even the slow pull dragged every
+    // fast swing perceptibly backwards ("more drift when I move fast").
+    const k = rateNow >= 40 ? 0 : clamp(dt / tau, 0, 1);
     this.yawOffDeg += errX * k;
     this.pitchOffDeg += errY * k;
 
@@ -423,10 +427,12 @@ export class Pointer {
     this.rate.x = (-yawDps / this.degPerScreen) * sx;
     this.rate.y = (-pitchDps / (this.degPerScreen * this.aspect)) * sy;
 
-    const kR = clamp(dt / this.leadTau, 0, 1);
-    this.emaRate.x += (this.rate.x - this.emaRate.x) * kR;
-    this.emaRate.y += (this.rate.y - this.emaRate.y) * kR;
-    this.emaAbsDps += (Math.max(Math.abs(yawDps), Math.abs(pitchDps)) - this.emaAbsDps) * kR;
+    // Exact one-pole kernel: dt/tau clamped saturates to 1 when tau is at or
+    // under the packet interval, silently disabling the smoothing entirely.
+    const kE = 1 - Math.exp(-dt / this.leadTau);
+    this.emaRate.x += (this.rate.x - this.emaRate.x) * kE;
+    this.emaRate.y += (this.rate.y - this.emaRate.y) * kE;
+    this.emaAbsDps += (Math.max(Math.abs(yawDps), Math.abs(pitchDps)) - this.emaAbsDps) * kE;
   }
 
   /** Reported gyro → true body rates through the learned map. */

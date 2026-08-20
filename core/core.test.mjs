@@ -475,4 +475,19 @@ test('display lead does not shimmer: noisy gyro, smooth cursor', () => {
   const rOff = roughness(off.track);
   assert.ok(rOn < rOff * 1.35,
     `lead adds no shimmer: ${(rOn * 1e4).toFixed(2)} vs ${(rOff * 1e4).toFixed(2)} (×1e-4/frame²)`);
+
+  // And at genuinely fast swings (~100°/s peak, lead fully engaged) — the
+  // "jittery when I move fast" report. The raw-rate lead measured ~2× here.
+  const fast = {
+    yaw: (t) => 13 * Math.sin(2 * Math.PI * 1.2 * t),
+    secs: 6, device: noisy, packetDelayMs: 30,
+  };
+  seed = 11;
+  const fOn = drive({ ...fast });
+  seed = 11;
+  const fOff = drive({ ...fast, pointer: new Pointer({ displayLead: false }) });
+  const frOn = roughness(fOn.track);
+  const frOff = roughness(fOff.track);
+  assert.ok(frOn < frOff * 1.7,
+    `fast swings stay clean: ${(frOn * 1e4).toFixed(2)} vs ${(frOff * 1e4).toFixed(2)} (×1e-4/frame²)`);
 });
