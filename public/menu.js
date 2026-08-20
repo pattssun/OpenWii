@@ -644,13 +644,29 @@ function ensureAudio() {
 }
 ensureAudio();
 audio.startMusic();   // the element route may be allowed with no gesture at all
+let soundHintOn = false;
 const audioRetry = setInterval(() => {
   audio.startMusic();               // retries a policy-blocked element too
   ensureAudio();                    // unlocks the cue engine when allowed
   const musicOn = audio.music && (!audio.music.el || !audio.music.el.paused);
   const ctxOn = audio.ctx && audio.ctx.state === 'running';
-  if (musicOn && ctxOn) clearInterval(audioRetry);
+  if (musicOn && ctxOn) {
+    if (soundHintOn) { soundHintOn = false; speedUntil = 1; }   // hide next frame
+    clearInterval(audioRetry);
+  }
 }, 500);
+
+// A truly fresh browser session may refuse all autoplay until one local
+// click — say so quietly instead of seeming broken. (npm run tv launches
+// Chrome with autoplay enabled and never needs this.)
+setTimeout(() => {
+  const musicOn = audio.music && (!audio.music.el || !audio.music.el.paused);
+  if (musicOn) return;
+  soundHintOn = true;
+  speedUntil = performance.now() + 1e9;
+  $('speed').textContent = '🔊 Click anywhere once for sound';
+  $('speed').classList.add('on');
+}, 1500);
 
 /** Transient readout so speed changes are visible while adjusting. */
 let speedUntil = 0;
@@ -874,6 +890,12 @@ function step(now, dt) {
   wiiButtonHover += (wiiTarget - wiiButtonHover) * Math.min(1, dt * 12);
   const qrTarget = anyHover('qr') ? 1 : 0;
   qrHover += (qrTarget - qrHover) * Math.min(1, dt * 12);
+  // The transient pill (pointer speed / sound hint) hides itself on time.
+  if (speedUntil && now > speedUntil) {
+    speedUntil = 0;
+    $('speed').classList.remove('on');
+  }
+
   barClock += dt;
   if (barClock > 0.2) { barClock = 0; drawBar(); }
 
