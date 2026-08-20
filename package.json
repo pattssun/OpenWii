@@ -7,6 +7,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "tv": "open -na 'Google Chrome' --args --new-window --autoplay-policy=no-user-gesture-required https://localhost:8443/",
     "dev": "node --watch server.js",
     "cert": "node scripts/gen-cert.js",
     "test": "node --test \"core/**/*.test.mjs\" \"games/**/*.test.mjs\""

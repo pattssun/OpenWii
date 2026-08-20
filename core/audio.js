@@ -41,6 +41,10 @@ export class AudioEngine {
     // suspending at the source kills the background-tab loop for every page.
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', () => {
+        if (this.music && this.music.el) {
+          if (document.hidden) this.music.el.pause();
+          else this.music.el.play().catch(() => {});
+        }
         if (!this.ctx) return;
         if (document.hidden) this.ctx.suspend();
         else if (this.ctx.state === 'suspended') this.ctx.resume();
@@ -169,31 +173,42 @@ export class AudioEngine {
   // ── Music ────────────────────────────────────────────────────────────────
   /**
    * The menu theme. If `audio/menu-music.{mp3,wav,ogg}` exists it loops that
-   * file; otherwise the synthesized loop below plays. Like every cue, the
-   * real recording lives outside the repo.
+   * file THROUGH AN <audio> ELEMENT, not Web Audio — deliberately. A media
+   * element follows the media autoplay policy: it may start with no gesture
+   * once the user has ever clicked the origin this session, and its audible
+   * minutes build the engagement score that eventually lets a completely
+   * fresh page load autoplay too. An AudioContext gets neither courtesy —
+   * it stays suspended until a fresh gesture on every reload, which is
+   * exactly the "silent until I click something" complaint.
+   *
+   * Safe to call repeatedly: a blocked element is retried on each call.
+   * Falls back to the synthesized loop (Web Audio) when no file exists.
    */
   startMusic() {
-    if (this.muted || !this.ctx || this.music) return;
-    this.music = 'starting';
-    this.loadOverride('menu-music').then((buf) => {
-      if (this.music !== 'starting') return;   // stopped while probing
-      if (buf) {
-        const src = this.ctx.createBufferSource();
-        src.buffer = buf;
-        src.loop = true;
-        src.connect(this.musicGain);
-        src.start();
-        this.music = { src };
-      } else {
+    if (this.muted) return;
+    if (this.music && this.music.el) {
+      if (this.music.el.paused) this.music.el.play().catch(() => {});
+      return;
+    }
+    if (this.music) return;
+    const tryExt = (i) => {
+      if (i >= EXTENSIONS.length) {
         this.music = null;
-        this.startSynthMusic();
+        if (this.ctx) this.startSynthMusic();
+        return;
       }
-    }).catch(() => {
-      if (this.music === 'starting') {
-        this.music = null;
-        this.startSynthMusic();
-      }
-    });
+      const el = new Audio(`${this.basePath}/menu-music.${EXTENSIONS[i]}`);
+      el.loop = true;
+      // Matches the Web Audio route's effective level: musicGain × master.
+      el.volume = Math.min(1, 0.42 * this.volume);
+      el.addEventListener('error', () => {
+        if (this.music && this.music.el === el) this.music = null;
+        tryExt(i + 1);
+      }, { once: true });
+      this.music = { el };
+      el.play().catch(() => { /* policy block — retried on the next call */ });
+    };
+    tryExt(0);
   }
 
   /**
@@ -241,7 +256,10 @@ export class AudioEngine {
   }
 
   stopMusic() {
-    if (this.music && this.music.src) {
+    if (this.music && this.music.el) {
+      this.music.el.pause();
+      this.music.el.src = '';
+    } else if (this.music && this.music.src) {
       try { this.music.src.stop(); } catch { /* already ended */ }
     } else if (typeof this.music === 'number') {
       clearInterval(this.music);
@@ -250,6 +268,7 @@ export class AudioEngine {
   }
 
   setMusicVolume(v) {
+    if (this.music && this.music.el) this.music.el.volume = Math.min(1, v * this.volume);
     if (this.musicGain) this.musicGain.gain.value = v;
   }
 }

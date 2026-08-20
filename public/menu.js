@@ -643,13 +643,13 @@ function ensureAudio() {
   });
 }
 ensureAudio();
+audio.startMusic();   // the element route may be allowed with no gesture at all
 const audioRetry = setInterval(() => {
-  if (audio.ctx && audio.ctx.state === 'running') {
-    if (!audio.music) audio.startMusic();
-    clearInterval(audioRetry);
-  } else {
-    ensureAudio();
-  }
+  audio.startMusic();               // retries a policy-blocked element too
+  ensureAudio();                    // unlocks the cue engine when allowed
+  const musicOn = audio.music && (!audio.music.el || !audio.music.el.paused);
+  const ctxOn = audio.ctx && audio.ctx.state === 'running';
+  if (musicOn && ctxOn) clearInterval(audioRetry);
 }, 500);
 
 /** Transient readout so speed changes are visible while adjusting. */
@@ -979,12 +979,13 @@ setInterval(() => {
   requestAnimationFrame(() => requestAnimationFrame(() => {
     veil.style.opacity = '0';
     setTimeout(() => veil.remove(), 550);
+    audio.startMusic();              // element route: may start with no gesture
     audio.unlock().then((ok) => {
       if (!ok) return;               // policy still blocks: the retry loop takes over
       // The chime waits for its sampled file so the real HOME sound rings,
       // not the synth stand-in.
       if (fromHome) audio.loadOverride('menu-back').then(() => audio.play('menu-back'));
-      if (!audio.music) audio.startMusic();
+      audio.startMusic();
     });
   }));
 }
