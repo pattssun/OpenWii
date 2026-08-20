@@ -52,9 +52,7 @@
      when the server is unreachable. */
   #row-top { width: 100%; display: flex; flex: none; position: relative;
              align-items: flex-start; min-height: clamp(38px, 6vh, 48px); }
-  #pwr-wrap { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-  #pwr-wrap small { font-size: 7px; font-weight: 700; letter-spacing: .14em;
-                    color: #93a3b4; }
+  #pwr-wrap { display: flex; flex-direction: column; align-items: center; }
   #power {
     width: clamp(30px, 4.6vh, 38px); height: clamp(30px, 4.6vh, 38px); border-radius: 50%;
     background: linear-gradient(180deg, #ffffff, #e8edf2);
@@ -71,20 +69,35 @@
 
   /* D-pad: a solid cross. Sized by viewport height so short phones still fit
      the whole face; segments are percentages of the pad, not pixels. */
-  #dpad { position: relative; width: clamp(84px, 15vh, 128px); height: clamp(84px, 15vh, 128px); flex: none; }
+  /* One-piece cross. Three tricks:
+     - each segment's background is its SLICE of one continuous top-to-bottom
+       gradient, so every junction's tones match exactly;
+     - no per-arm drop shadows (they cast onto neighbouring arms as phantom
+       inner lines) — instead the container's drop-shadow filter wraps the
+       composited silhouette, giving one cross-shaped shadow;
+     - the centre paints last, borderless and a hair oversized, covering the
+       arms' inner border edges. */
+  #dpad { position: relative; width: clamp(84px, 15vh, 128px); height: clamp(84px, 15vh, 128px);
+          flex: none; filter: drop-shadow(0 3px 6px rgba(30, 50, 80, .16)); }
   .dp {
     position: absolute; width: 34.4%; height: 34.4%;
-    background: linear-gradient(180deg, #ffffff, #e6ebf0);
     border: 1px solid #c6cfd9;
-    box-shadow: 0 2px 4px #0002, inset 0 1px 0 #fff;
+    box-shadow: inset 0 1px 0 #fff;
   }
   .dp:active { filter: brightness(0.93); }
-  .dp.u { left: 32.8%; top: 0;    border-radius: 10px 10px 0 0; }
-  .dp.d { left: 32.8%; bottom: 0; border-radius: 0 0 10px 10px; }
-  .dp.l { left: 0;     top: 32.8%; border-radius: 10px 0 0 10px; }
-  .dp.r { right: 0;    top: 32.8%; border-radius: 0 10px 10px 0; }
-  .dp.c { left: 32.8%; top: 32.8%; border-radius: 0; box-shadow: none; border: none;
-          background: #f2f5f8; pointer-events: none; }
+  .dp.u { left: 32.8%; top: 0;    border-radius: 10px 10px 0 0;
+          background: linear-gradient(180deg, #ffffff, #f3f6f8); }
+  .dp.d { left: 32.8%; bottom: 0; border-radius: 0 0 10px 10px;
+          background: linear-gradient(180deg, #ebeff3, #e6ebf0); }
+  .dp.l { left: 0;     top: 32.8%; border-radius: 10px 0 0 10px;
+          background: linear-gradient(180deg, #f3f6f8, #ebeff3); }
+  .dp.r { right: 0;    top: 32.8%; border-radius: 0 10px 10px 0;
+          background: linear-gradient(180deg, #f3f6f8, #ebeff3); }
+  .dp.c { left: calc(32.8% - 1.5px); top: calc(32.8% - 1.5px);
+          width: calc(34.4% + 3px); height: calc(34.4% + 3px);
+          border-radius: 0; box-shadow: none; border: none;
+          background: linear-gradient(180deg, #f3f6f8, #ebeff3);
+          pointer-events: none; z-index: 1; }
   .dp::after {
     content: ''; position: absolute; left: 50%; top: 50%; width: 0; height: 0;
     border: 7px solid transparent; opacity: .45;
@@ -237,7 +250,7 @@
   <div id="stage">
     <div id="remote" class="asleep">
       <div id="row-top">
-        <div id="pwr-wrap"><small>POWER</small><button id="power" aria-label="power">⏻</button></div>
+        <div id="pwr-wrap"><button id="power" aria-label="power">⏻</button></div>
         <div id="brand">OpenWii</div>
       </div>
 
