@@ -1229,6 +1229,9 @@ audio.unlock();
 // module: startGame touches const helpers that are in the temporal dead zone
 // until the whole module has evaluated.
 startGame();
+// Hold the first fruit until the launch splash has fully faded: its throw
+// whoosh under the loading banner read as a stray leftover menu sound.
+game.state.nextSpawn = performance.now() + 1800;
 requestAnimationFrame(frame);
 
 // Exposed for the verification harness. `pointer` is slot 0's, kept for
