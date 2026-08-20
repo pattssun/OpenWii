@@ -652,7 +652,7 @@ function showSpeed(slot = 0) {
 function quickRecentre(slot = 0) {
   ensureAudio();
   inputFor(slot).pointer.recentre();
-  audio.play('select');
+  audio.play('menu-select');
 }
 
 // ── Interaction ────────────────────────────────────────────────────────────
@@ -662,14 +662,14 @@ function pressA(slot = 0) {
   if (launching) return;
 
   const hovered = inputFor(slot).hover;
-  if (hovered === 'wii' || hovered === 'qr') { audio.play('select'); return; }
+  if (hovered === 'wii' || hovered === 'qr') { audio.play('menu-select'); return; }
   if (hovered && hovered.dir !== undefined) { turnPage(hovered.dir); return; }
   if (hovered && hovered.game) launch(hovered);
 }
 
 function pressB() {
   ensureAudio();
-  audio.play('back');
+  audio.play('menu-back');
 }
 
 function turnPage(dir) {
@@ -678,7 +678,7 @@ function turnPage(dir) {
   if (next < 0 || next >= pages) return;
   page = next;
   buildTiles();
-  audio.play('select');
+  audio.play('menu-select');
   refreshArrows();
 }
 
@@ -831,7 +831,7 @@ function step(now, dt) {
     inp.hand.visible = active && !launching;
 
     inp.hover = (active && !launching) ? hitTest(p.x, p.y) : null;
-    if (inp.hover && inp.hover !== inp.lastHover) audio.play('hover');
+    if (inp.hover && inp.hover !== inp.lastHover) audio.play('menu-hover');
     inp.lastHover = inp.hover;
   }
 

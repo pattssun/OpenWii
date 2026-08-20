@@ -168,10 +168,40 @@ export class AudioEngine {
 
   // ── Music ────────────────────────────────────────────────────────────────
   /**
-   * Looping menu theme. Scheduled a bar ahead on a timer rather than one long
-   * buffer, so it loops seamlessly and can be stopped mid-phrase.
+   * The menu theme. If `audio/menu-music.{mp3,wav,ogg}` exists it loops that
+   * file; otherwise the synthesized loop below plays. Like every cue, the
+   * real recording lives outside the repo.
    */
   startMusic() {
+    if (this.muted || !this.ctx || this.music) return;
+    this.music = 'starting';
+    this.loadOverride('menu-music').then((buf) => {
+      if (this.music !== 'starting') return;   // stopped while probing
+      if (buf) {
+        const src = this.ctx.createBufferSource();
+        src.buffer = buf;
+        src.loop = true;
+        src.connect(this.musicGain);
+        src.start();
+        this.music = { src };
+      } else {
+        this.music = null;
+        this.startSynthMusic();
+      }
+    }).catch(() => {
+      if (this.music === 'starting') {
+        this.music = null;
+        this.startSynthMusic();
+      }
+    });
+  }
+
+  /**
+   * The synthesized fallback theme. Scheduled a bar ahead on a timer rather
+   * than one long buffer, so it loops seamlessly and can be stopped
+   * mid-phrase.
+   */
+  startSynthMusic() {
     if (this.muted || !this.ctx || this.music) return;
     const beat = 0.5;
     // Lazy ii–V–I-ish wander in C, sevenths throughout for the soft major mood.
@@ -211,7 +241,11 @@ export class AudioEngine {
   }
 
   stopMusic() {
-    if (this.music) clearInterval(this.music);
+    if (this.music && this.music.src) {
+      try { this.music.src.stop(); } catch { /* already ended */ }
+    } else if (typeof this.music === 'number') {
+      clearInterval(this.music);
+    }
     this.music = null;
   }
 
@@ -234,6 +268,13 @@ function registerDefaults(a) {
     a.tone({ freq: 520, dur: 0.1, type: 'sine', gain: 0.18 });
     a.tone({ freq: 350, dur: 0.14, type: 'sine', gain: 0.15, delay: 0.05 });
   });
+
+  // Menu-scoped aliases: same synths, but their own names — so dropping the
+  // real console recordings into audio/menu-*.{mp3,wav,ogg} reskins the menu
+  // without touching the games that share 'hover'/'select'/'back'.
+  a.register('menu-hover', () => a.play('hover'));
+  a.register('menu-select', () => a.play('select'));
+  a.register('menu-back', () => a.play('back'));
 
   a.register('channel-open', () => {
     a.noise({ dur: 0.5, gain: 0.16, type: 'bandpass', freq: 400, sweepTo: 3500, q: 0.8 });
