@@ -136,13 +136,24 @@ function drawTileFace(g, w, h, game) {
   g.fillStyle = grad;
   g.fillRect(0, 0, w, h);
 
+  // Centre the emoji by its INK, not its glyph box: emoji art routinely sits
+  // off-centre inside the glyph's advance width (the watermelon leans left,
+  // the plane leans left), so advance-centred fillText looks misaligned.
+  // Measure the actual painted extents and centre those in the art area
+  // between the top padding and the title.
   g.font = `${Math.round(h * 0.42)}px -apple-system, "Apple Color Emoji", system-ui, sans-serif`;
   g.textAlign = 'center';
   g.textBaseline = 'middle';
+  const em = game.emoji || '🎮';
+  const met = g.measureText(em);
+  const inkDx = ((met.actualBoundingBoxRight ?? 0) - (met.actualBoundingBoxLeft ?? 0)) / 2;
+  const inkDy = ((met.actualBoundingBoxDescent ?? 0) - (met.actualBoundingBoxAscent ?? 0)) / 2;
+  const titleTop = (h - pad - 18) - h * 0.115;
+  const artCy = (pad + titleTop) / 2;
   g.shadowColor = 'rgba(0,0,0,0.25)';
   g.shadowBlur = 18;
   g.shadowOffsetY = 6;
-  g.fillText(game.emoji || '🎮', w / 2, h * 0.42);
+  g.fillText(em, w / 2 - inkDx, artCy - inkDy);
   g.shadowColor = 'transparent';
 
   g.fillStyle = '#ffffff';
