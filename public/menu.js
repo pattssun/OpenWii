@@ -634,7 +634,12 @@ const link = new GameLink({
  */
 function ensureAudio() {
   audio.unlock().then((ok) => {
-    if (ok && !audio.music) audio.startMusic();
+    if (!ok) return;
+    // Pre-warm the menu's sampled cues: without this, each cue's FIRST play
+    // of the session uses the synth fallback while the file is still being
+    // fetched — the one play the user most notices.
+    for (const cue of ['menu-hover', 'menu-select', 'menu-back']) audio.loadOverride(cue);
+    if (!audio.music) audio.startMusic();
   });
 }
 ensureAudio();
@@ -955,22 +960,34 @@ setInterval(() => {
   ].join('\n');
 }, 250);
 
-// Arriving from a game's HOME press: the game faded to silver, so the menu
-// fades in from the same silver — one continuous motion, chime already rung.
-try {
-  const homeAt = Number(sessionStorage.getItem('openwii.home') || 0);
-  sessionStorage.removeItem('openwii.home');
-  if (Date.now() - homeAt < 4000) {
-    const veil = document.createElement('div');
-    veil.style.cssText = 'position:fixed;inset:0;background:#e4eaf1;z-index:999;'
-      + 'transition:opacity .45s ease;pointer-events:none;';
-    document.body.appendChild(veil);
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      veil.style.opacity = '0';
-      setTimeout(() => veil.remove(), 550);
-    }));
-  }
-} catch { /* storage unavailable — just skip the veil */ }
+// Every arrival at the menu — fresh load, reload, or backing out of a game —
+// fades in from silver, with the audio joining at the same instant the fade
+// begins: the theme starts (and, arriving from a game's HOME press, the HOME
+// chime rings) right as the menu appears, not whenever a retry timer lands.
+{
+  let fromHome = false;
+  try {
+    const homeAt = Number(sessionStorage.getItem('openwii.home') || 0);
+    sessionStorage.removeItem('openwii.home');
+    fromHome = Date.now() - homeAt < 4000;
+  } catch { /* storage unavailable */ }
+
+  const veil = document.createElement('div');
+  veil.style.cssText = 'position:fixed;inset:0;background:#e4eaf1;z-index:999;'
+    + 'transition:opacity .45s ease;pointer-events:none;';
+  document.body.appendChild(veil);
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    veil.style.opacity = '0';
+    setTimeout(() => veil.remove(), 550);
+    audio.unlock().then((ok) => {
+      if (!ok) return;               // policy still blocks: the retry loop takes over
+      // The chime waits for its sampled file so the real HOME sound rings,
+      // not the synth stand-in.
+      if (fromHome) audio.loadOverride('menu-back').then(() => audio.play('menu-back'));
+      if (!audio.music) audio.startMusic();
+    });
+  }));
+}
 
 drawBar();
 resize();

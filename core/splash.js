@@ -8,14 +8,16 @@
  * continuous motion across the page navigation, with no flash between.
  */
 /**
- * Leave a game for the menu, the console way: the HOME sound plays, the game
- * fades to the menu's silver, and the menu (see menu.js) fades in from the
- * same silver on arrival — one continuous motion, chime first.
+ * Leave a game for the menu, the console way: the game fades to the menu's
+ * silver, and the menu (see menu.js) fades in from the same silver with the
+ * HOME chime and the theme starting together. The chime deliberately rings
+ * on the MENU side: a game page's audio context is usually still suspended
+ * (no local gesture ever happened there), so playing here was silently
+ * dropped — and navigation would cut it off anyway.
  */
-export function goHome(audio) {
+export function goHome() {
   if (goHome.leaving) return;
   goHome.leaving = true;
-  try { if (audio) audio.play('menu-back'); } catch { /* sound is best-effort */ }
   const el = document.createElement('div');
   el.style.cssText = 'position:fixed;inset:0;background:#e4eaf1;opacity:0;'
     + 'transition:opacity .5s ease;z-index:999;pointer-events:none;';
