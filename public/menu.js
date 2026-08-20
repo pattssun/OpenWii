@@ -641,16 +641,19 @@ function ensureAudio() {
     for (const cue of ['menu-hover', 'menu-select', 'menu-back']) audio.loadOverride(cue);
     // Never (re)start the theme once a launch is underway — a retry landing
     // after launch()'s stopMusic() brought the music back mid-banner.
-    if (!audio.music && !launching) audio.startMusic();
+    if (!audio.music && !launching && musicReady) audio.startMusic();
   });
 }
 ensureAudio();
-audio.startMusic();   // the element route may be allowed with no gesture at all
+// The theme waits for the fade-in: musicReady flips a beat after the veil
+// starts lifting (see the boot block below), so the music swells with the
+// menu materialising instead of blurting out at script-eval time.
+let musicReady = false;
 let soundHintOn = false;
 const audioRetry = setInterval(() => {
   if (launching) { clearInterval(audioRetry); return; }   // never restart mid-launch
-  audio.startMusic();               // retries a policy-blocked element too
-  ensureAudio();                    // unlocks the cue engine when allowed
+  if (musicReady) audio.startMusic();   // retries a policy-blocked element too
+  ensureAudio();                        // unlocks the cue engine when allowed
   const musicOn = audio.music && (!audio.music.el || !audio.music.el.paused);
   const ctxOn = audio.ctx && audio.ctx.state === 'running';
   if (musicOn && ctxOn) {
@@ -1002,19 +1005,23 @@ setInterval(() => {
 
   const veil = document.createElement('div');
   veil.style.cssText = 'position:fixed;inset:0;background:#e4eaf1;z-index:999;'
-    + 'transition:opacity .45s ease;pointer-events:none;';
+    + 'transition:opacity .9s ease;pointer-events:none;';
   document.body.appendChild(veil);
   requestAnimationFrame(() => requestAnimationFrame(() => {
     veil.style.opacity = '0';
-    setTimeout(() => veil.remove(), 550);
-    audio.startMusic();              // element route: may start with no gesture
+    setTimeout(() => veil.remove(), 1000);
     audio.unlock().then((ok) => {
       if (!ok) return;               // policy still blocks: the retry loop takes over
       // Fallback chime: only when the game page couldn't ring it itself
       // (its audio was still policy-blocked at the moment HOME was pressed).
       if (fromHome && !homeChimed) audio.loadOverride('menu-back').then(() => audio.play('menu-back'));
-      audio.startMusic();
     });
+    // The theme joins a beat into the fade — the menu is half-materialised
+    // when the music swells, instead of both arriving in a rush.
+    setTimeout(() => {
+      musicReady = true;
+      audio.startMusic();
+    }, 300);
   }));
 }
 

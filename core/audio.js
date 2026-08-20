@@ -300,12 +300,13 @@ function registerDefaults(a) {
     a.tone({ freq: 350, dur: 0.14, type: 'sine', gain: 0.15, delay: 0.05 });
   });
 
-  // Menu-scoped aliases: same synths, but their own names — so dropping the
-  // real console recordings into audio/menu-*.{mp3,wav,ogg} reskins the menu
-  // without touching the games that share 'hover'/'select'/'back'.
-  a.register('menu-hover', () => a.play('hover'));
-  a.register('menu-select', () => a.play('select'));
-  a.register('menu-back', () => a.play('back'));
+  // Menu-scoped cues are SAMPLED-ONLY: no synth fallback. The menu runs on
+  // the real console recordings in audio/menu-*.{wav,mp3,ogg}; before a file
+  // has loaded the cue is simply silent. The old synth stand-ins used to
+  // flash for a split second whenever a cue fired ahead of its download.
+  a.register('menu-hover', () => {});
+  a.register('menu-select', () => {});
+  a.register('menu-back', () => {});
 
   a.register('channel-open', () => {
     a.noise({ dur: 0.5, gain: 0.16, type: 'bandpass', freq: 400, sweepTo: 3500, q: 0.8 });
