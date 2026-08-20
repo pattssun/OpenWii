@@ -625,19 +625,27 @@ const link = new GameLink({
 });
 
 /**
- * Browsers refuse to start audio without a user gesture, so the music can only
- * begin on the first interaction. The removed warning screen used to be that
- * gesture; now any button press or click serves.
+ * Start audio the moment the browser lets us. Chrome permits autoplay
+ * outright once the site has earned it (or when the navigation here was
+ * user-initiated); otherwise the first gesture unlocks it. So: try at boot,
+ * keep retrying quietly, and also try on every interaction — the music and
+ * all cues come alive at the earliest instant the policy allows, instead of
+ * "sometimes silent until you happen to click".
  */
-let audioStarted = false;
 function ensureAudio() {
-  if (audioStarted) return;
-  audioStarted = true;
   audio.unlock().then((ok) => {
-    if (!ok) { audioStarted = false; return; }
-    audio.startMusic();
+    if (ok && !audio.music) audio.startMusic();
   });
 }
+ensureAudio();
+const audioRetry = setInterval(() => {
+  if (audio.ctx && audio.ctx.state === 'running') {
+    if (!audio.music) audio.startMusic();
+    clearInterval(audioRetry);
+  } else {
+    ensureAudio();
+  }
+}, 500);
 
 /** Transient readout so speed changes are visible while adjusting. */
 let speedUntil = 0;
@@ -946,6 +954,23 @@ setInterval(() => {
     `channels    ${games.length}`,
   ].join('\n');
 }, 250);
+
+// Arriving from a game's HOME press: the game faded to silver, so the menu
+// fades in from the same silver — one continuous motion, chime already rung.
+try {
+  const homeAt = Number(sessionStorage.getItem('openwii.home') || 0);
+  sessionStorage.removeItem('openwii.home');
+  if (Date.now() - homeAt < 4000) {
+    const veil = document.createElement('div');
+    veil.style.cssText = 'position:fixed;inset:0;background:#e4eaf1;z-index:999;'
+      + 'transition:opacity .45s ease;pointer-events:none;';
+    document.body.appendChild(veil);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      veil.style.opacity = '0';
+      setTimeout(() => veil.remove(), 550);
+    }));
+  }
+} catch { /* storage unavailable — just skip the veil */ }
 
 drawBar();
 resize();

@@ -1,6 +1,7 @@
 import { Pointer } from './pointer.js';
 import { GameLink } from './net.js';
 import { AudioEngine } from './audio.js';
+import { goHome } from './splash.js';
 import { saveSensitivity, loadSensitivity } from './calibration.js';
 import { clamp } from './orientation.js';
 
@@ -15,7 +16,7 @@ import { clamp } from './orientation.js';
  */
 export function createChannel({
   onA = () => {},
-  onB = () => { window.location.href = '/'; },
+  onB = null,               // default: HOME chime + fade back to the menu
   onCommand = () => {},
   onSample = null,          // (sample, dt, now) — raw attitude for tilt games
 } = {}) {
@@ -38,7 +39,7 @@ export function createChannel({
     },
     onCommand: (cmd) => {
       if (cmd.type === 'button' && cmd.button === 'A') { audio.unlock(); onA(); }
-      else if (cmd.type === 'button' && cmd.button === 'B') onB();
+      else if (cmd.type === 'button' && cmd.button === 'B') (onB || (() => goHome(audio)))();
       else if (cmd.type === 'calibrate' || cmd.type === 'recentre') pointer.recentre();
       else if (cmd.type === 'speed') {
         pointer.sensitivity = clamp(pointer.sensitivity * (cmd.factor || 1), 0.2, 6);
@@ -65,7 +66,7 @@ export function createChannel({
   window.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
     if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); audio.unlock(); onA(); }
-    else if (k === 'b' || e.key === 'Escape') onB();
+    else if (k === 'b' || e.key === 'Escape') (onB || (() => goHome(audio)))();
     else if (k === 'c' || k === 'r') pointer.recentre();
     else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
       e.preventDefault();

@@ -7,6 +7,24 @@
  * its scene), holds a beat, and fades it out — so the launch reads as one
  * continuous motion across the page navigation, with no flash between.
  */
+/**
+ * Leave a game for the menu, the console way: the HOME sound plays, the game
+ * fades to the menu's silver, and the menu (see menu.js) fades in from the
+ * same silver on arrival — one continuous motion, chime first.
+ */
+export function goHome(audio) {
+  if (goHome.leaving) return;
+  goHome.leaving = true;
+  try { if (audio) audio.play('menu-back'); } catch { /* sound is best-effort */ }
+  const el = document.createElement('div');
+  el.style.cssText = 'position:fixed;inset:0;background:#e4eaf1;opacity:0;'
+    + 'transition:opacity .5s ease;z-index:999;pointer-events:none;';
+  document.body.appendChild(el);
+  requestAnimationFrame(() => { el.style.opacity = '1'; });
+  try { sessionStorage.setItem('openwii.home', String(Date.now())); } catch { /* fine */ }
+  setTimeout(() => { window.location.href = '/'; }, 800);
+}
+
 export function consumeLaunchSplash() {
   let data;
   try {

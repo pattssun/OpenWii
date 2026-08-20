@@ -64,7 +64,7 @@ export class AudioEngine {
       this.master.gain.value = this.volume;
       this.master.connect(this.ctx.destination);
       this.musicGain = this.ctx.createGain();
-      this.musicGain.gain.value = 0.35;
+      this.musicGain.gain.value = 0.42;
       this.musicGain.connect(this.master);
     }
     if (this.ctx.state === 'suspended') await this.ctx.resume();

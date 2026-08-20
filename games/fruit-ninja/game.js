@@ -1,5 +1,5 @@
 import * as THREE from '/vendor/three/three.module.js';
-import { consumeLaunchSplash } from '../../core/splash.js';
+import { consumeLaunchSplash, goHome } from '../../core/splash.js';
 
 // Carry the menu's launch banner across the navigation, then fade it out.
 consumeLaunchSplash();
@@ -929,7 +929,7 @@ const link = new GameLink({
     else if (cmd.type === 'start') beginPlay();
     else if (cmd.type === 'button' && cmd.button === 'A') beginPlay();
     // B returns to the menu, so the whole loop is reachable from the phone.
-    else if (cmd.type === 'button' && cmd.button === 'B') window.location.href = '/';
+    else if (cmd.type === 'button' && cmd.button === 'B') goHome(audio);
     else if (cmd.type === 'speed') {
       const inp = inputFor(slot);
       inp.pointer.sensitivity = clamp(inp.pointer.sensitivity * (cmd.factor || 1), 0.2, 6);
