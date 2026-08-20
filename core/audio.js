@@ -191,7 +191,15 @@ export class AudioEngine {
       return;
     }
     if (this.music) return;
+    // Generation token: stopMusic() bumps it, orphaning every pending
+    // callback of this attempt. Without it, stopping the element fired its
+    // 'error' listener (clearing src triggers the load algorithm), the
+    // extension fallback walked .wav → .ogg → nothing, and the SYNTH THEME
+    // started — the old menu music, resurrected for the last split second
+    // of every channel launch.
+    const gen = (this.musicGen = (this.musicGen || 0) + 1);
     const tryExt = (i) => {
+      if (gen !== this.musicGen) return;
       if (i >= EXTENSIONS.length) {
         this.music = null;
         if (this.ctx) this.startSynthMusic();
@@ -214,6 +222,7 @@ export class AudioEngine {
         }
       });
       el.addEventListener('error', () => {
+        if (gen !== this.musicGen) return;   // stopped: stay stopped
         if (this.music && this.music.el === el) this.music = null;
         tryExt(i + 1);
       }, { once: true });
@@ -268,6 +277,7 @@ export class AudioEngine {
   }
 
   stopMusic() {
+    this.musicGen = (this.musicGen || 0) + 1;   // orphan any pending callbacks
     if (this.music && this.music.el) {
       this.music.el.pause();
       this.music.el.src = '';
