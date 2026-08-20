@@ -29,7 +29,9 @@ const VIEW_H = 12.4;          // world units the camera frames vertically
 
 // ── Scene ──────────────────────────────────────────────────────────────────
 const canvas = $('scene');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+const renderer = new THREE.WebGLRenderer({
+  canvas, antialias: true, desynchronized: true, powerPreference: 'high-performance',
+});
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
 const scene = new THREE.Scene();

@@ -99,6 +99,12 @@ export class Pointer {
     this.rate = { x: 0, y: 0 };            // screen fractions per second
     this.rateDps = { yaw: 0, pitch: 0 };   // for the debug overlay
 
+    // Display-only dead reckoning: draw the cursor where the hand will be
+    // when the frame reaches the glass — roughly one packet interval plus
+    // half a display frame ahead. Toggleable for A/B tests.
+    this.displayLead = options.displayLead ?? true;
+    this.emaPacketDt = 1 / 60;             // measured packet cadence, seconds
+
     // ── Pose anchoring ──
     // The cursor state is a pair of angular offsets (degrees) from the pose
     // captured at recentre, not a raw screen position. Two consequences:
@@ -203,6 +209,7 @@ export class Pointer {
     this.source = sample.quat ? 'quaternion' : 'euler';
     this.live = true;
     this.lastSeen = now;
+    if (dt > 0 && dt < 0.1) this.emaPacketDt += (dt - this.emaPacketDt) * 0.1;
 
     // ── Ground-truth body rates from the attitude itself ──
     let omegaTrue = { x: 0, y: 0, z: 0 };
@@ -441,6 +448,24 @@ export class Pointer {
 
       this.pos.x = clamp(0.5 - (this.yawOffDeg * sx) / this.degPerScreen, 0, 1);
       this.pos.y = clamp(0.5 - (this.pitchOffDeg * sy) / (this.degPerScreen * this.aspect), 0, 1);
+
+      // Dead reckoning, display-only: the drawn cursor runs ahead of the
+      // integrated state by the pipeline's own latency (packet cadence plus
+      // half a frame), erasing most of the sensor→glass delay during real
+      // swings. It never touches the angular state or the pose healing, it
+      // ramps in only above aiming speeds (an earlier build predicted at
+      // rest and amplified hand tremor — see the git history), and because
+      // it is proportional to the current rate it collapses to zero the
+      // instant the hand stops — no overshoot to unwind.
+      if (this.displayLead) {
+        const m = Math.max(Math.abs(this.rateDps.yaw), Math.abs(this.rateDps.pitch));
+        const ramp = clamp((m - 15) / 25, 0, 1);
+        if (ramp > 0) {
+          const lead = clamp(this.emaPacketDt + 0.008, 0.012, 0.035) * ramp;
+          this.pos.x = clamp(this.pos.x + this.rate.x * lead, 0, 1);
+          this.pos.y = clamp(this.pos.y + this.rate.y * lead, 0, 1);
+        }
+      }
     }
     return this.pos;
   }

@@ -25,7 +25,12 @@ const MORTAL = new URLSearchParams(location.search).has('mortal');
 
 // ── Scene ──────────────────────────────────────────────────────────────────
 const canvas = $('game');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+// desynchronized: lets Chrome present the canvas without waiting for the
+// compositor's queue — worth up to a frame of cursor latency. Ignored where
+// unsupported.
+const renderer = new THREE.WebGLRenderer({
+  canvas, antialias: true, desynchronized: true, powerPreference: 'high-performance',
+});
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
 const scene = new THREE.Scene();

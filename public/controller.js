@@ -303,7 +303,9 @@ function startGenericSensor() {
   if (!Ctor) return false;
 
   try {
-    genericSensor = new Ctor({ frequency: 60, referenceFrame: 'device' });
+    // Ask for 120Hz; the browser clamps to what the hardware offers. Every
+    // extra Hz shortens the packet interval the PC's dead reckoning covers.
+    genericSensor = new Ctor({ frequency: 120, referenceFrame: 'device' });
   } catch (err) {
     renderDiagnostics('⚠️ Sensor unavailable', SENSOR_ERRORS[err.name] || err.message);
     return false;

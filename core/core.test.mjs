@@ -65,13 +65,14 @@ const LANDSCAPE = quatFromEuler(0, 0, 90);
  */
 function drive({
   yaw = () => 0, pitch = () => 0, grip = FLAT, device = DEVICE.spec,
-  lagMs = 60, secs = 6, pointer = null,
+  lagMs = 60, secs = 6, pointer = null, packetDelayMs = 0,
 }) {
   const p = pointer || new Pointer({});
   const attitude = (t) => mul(mul(axisQ(2, yaw(t)), axisQ(0, pitch(t))), grip);
   const FRAME = 1000 / 60;
   const h = 1e-4;
   const track = [];
+  const queue = [];   // packets in flight: sensor → network → game
   let ms = 0;
   for (let i = 0; i < secs * 60; i += 1, ms += FRAME) {
     const t = ms / 1000;
@@ -83,7 +84,9 @@ function drive({
     const r = device ? device(w) : null;
     const sample = { quat: attitude(Math.max(0, ms - lagMs) / 1000) };
     if (r) sample.motion = { rx: r[0], ry: r[1], rz: r[2] };
-    p.update(sample, FRAME / 1000, ms);
+    // Real packets take time to reach the game: emit now, deliver later.
+    queue.push({ at: ms + packetDelayMs, sample });
+    while (queue.length && queue[0].at <= ms) p.update(queue.shift().sample, FRAME / 1000, ms);
     const d = p.sampleAt(ms);
     track.push({ ms, x: d.x, y: d.y, yaw: yaw(t), pitch: pitch(t) });
   }
@@ -399,4 +402,35 @@ test('clamp loss is repaid mid-play — gentle aiming, no stillness required', (
   const done = track[track.length - 1];
   assert.ok(Math.abs(done.x - 0.5) < 0.08,
     `repaid during gentle aiming, no stillness (x=${done.x.toFixed(3)})`);
+});
+
+test('display lead cuts tracking delay during swings, and only during swings', () => {
+  // Identical wander through a realistic 30ms sensor→game pipeline, lead on
+  // vs off. The led cursor must track the commanded motion measurably
+  // tighter (it exists to cover exactly that delay), while gentle aiming
+  // must be bit-identical — the lead is gated on real motion, so tremor is
+  // never amplified (that bug shipped once; see the git history).
+  const on = drive({ ...WANDER, secs: 6, packetDelayMs: 30 });
+  const off = drive({
+    ...WANDER, secs: 6, packetDelayMs: 30, pointer: new Pointer({ displayLead: false }),
+  });
+  assert.ok(on.p.gyroTrusted && off.p.gyroTrusted, 'both trusted');
+  const errOn = yawError(on.track, 3000);
+  const errOff = yawError(off.track, 3000);
+  assert.ok(errOn < errOff * 0.8,
+    `lead tightens tracking: ${(errOn * 100).toFixed(2)}% vs ${(errOff * 100).toFixed(2)}%`);
+
+  // Gentle aiming (under the 15°/s ramp): the two must agree exactly.
+  const slowOn = drive({
+    yaw: (t) => 2 * Math.sin(2 * Math.PI * 0.5 * t), secs: 4, packetDelayMs: 30,
+  });
+  const slowOff = drive({
+    yaw: (t) => 2 * Math.sin(2 * Math.PI * 0.5 * t), secs: 4, packetDelayMs: 30,
+    pointer: new Pointer({ displayLead: false }),
+  });
+  let maxDiff = 0;
+  for (let i = 0; i < slowOn.track.length; i += 1) {
+    maxDiff = Math.max(maxDiff, Math.abs(slowOn.track[i].x - slowOff.track[i].x));
+  }
+  assert.ok(maxDiff < 1e-9, `no lead below the motion gate (max diff ${maxDiff.toExponential(1)})`);
 });
