@@ -195,11 +195,11 @@ export class FruitNinja {
   }
 
   spawnInterval(now) {
-    return Math.max(320, 1000 - ((now - this.state.startedAt) / 1000) * 12);
+    return Math.max(260, 780 - ((now - this.state.startedAt) / 1000) * 14);
   }
 
   bombChance(now) {
-    return clamp(0.04 + ((now - this.state.startedAt) / 1000) * 0.0022, 0, 0.2);
+    return clamp(0.06 + ((now - this.state.startedAt) / 1000) * 0.003, 0, 0.25);
   }
 
   update(now, dt) {
@@ -207,7 +207,8 @@ export class FruitNinja {
     if (this.state.phase !== 'playing') return;
 
     if (now >= this.state.nextSpawn) {
-      const burst = Math.random() < 0.22 ? 3 : Math.random() < 0.45 ? 2 : 1;
+      const roll = Math.random();
+      const burst = roll < 0.15 ? 4 : roll < 0.35 ? 3 : roll < 0.62 ? 2 : 1;
       for (let i = 0; i < burst; i += 1) this.spawn(Math.random() < this.bombChance(now), now);
       this.state.nextSpawn = now + this.spawnInterval(now);
     }
