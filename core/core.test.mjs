@@ -373,3 +373,28 @@ test('a held aim is never dragged — healing targets the pose, not the centre',
   assert.ok(Math.abs(done.y - settled.y) < 0.01,
     `held aim crept: ${settled.y.toFixed(3)} → ${done.y.toFixed(3)}`);
 });
+
+test('clamp loss is repaid mid-play — gentle aiming, no stillness required', () => {
+  // The real complaint: fruit ninja never contains 800ms of true stillness,
+  // so drift piled up until the player pressed re-centre by hand. A clamped
+  // swing's loss must now heal during ordinary between-slash aiming motion.
+  const p = new Pointer({});
+  drive({ ...WANDER, secs: 4, pointer: p });
+  assert.ok(p.gyroTrusted, 'trusted after wander');
+  p.recentre();
+  // A huge 60° slash out and back — far past the overshoot cap, aim is lost —
+  // followed by continuous gentle pitch wobble (~9°/s peak: above the still
+  // gate, well under the calm gate), never a moment of stillness.
+  const yaw = (t) => (t < 0.5 ? 0
+    : t < 1 ? -60 * ((t - 0.5) / 0.5)
+      : t < 1.5 ? -60
+        : t < 2 ? -60 * (1 - ((t - 1.5) / 0.5)) : 0);
+  const pitch = (t) => (t < 2 ? 0 : 3 * Math.sin(2 * Math.PI * 0.5 * (t - 2)));
+  const { track } = drive({ yaw, pitch, secs: 7, pointer: p });
+  const justBack = track.find((r) => r.ms >= 2100);
+  assert.ok(Math.abs(justBack.x - 0.5) > 0.2,
+    `sanity: the clamp cost real aim (x=${justBack.x.toFixed(3)})`);
+  const done = track[track.length - 1];
+  assert.ok(Math.abs(done.x - 0.5) < 0.08,
+    `repaid during gentle aiming, no stillness (x=${done.x.toFixed(3)})`);
+});

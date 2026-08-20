@@ -371,16 +371,33 @@ export class Pointer {
       this.usedBeam = beamId;
     }
 
-    // Two-speed complementary pull toward the pose: brisk once the hand has
-    // been still a moment, whisper-slow during motion (slow enough that the
-    // orientation estimate's lag distorts tracking by well under 2%, fast
-    // enough that deadzone and clamp losses can't pile up across a session).
-    const still = Math.abs(yawDps) < 2.5 && Math.abs(pitchDps) < 2.5;
+    // Complementary pull toward the pose, at three speeds:
+    //  - merely-aiming (< 8 dps for 400ms): brisk. Real play — fruit ninja
+    //    especially — almost never contains true stillness, but it is full
+    //    of these little aiming pauses between slashes, and they're where
+    //    drift has to be repaid or it piles up until the player recentres
+    //    by hand (the exact complaint that shaped this block).
+    //  - calm-but-moving with a PROVABLY wrong cursor: speed scales with the
+    //    size of the error, so one clamped 60° slash is repaid in a second
+    //    or two of ordinary aiming instead of eight. Gated to moderate rates:
+    //    during a fast slash the lagged pose target trails the true pose by
+    //    tens of degrees, and correcting hard against that would fight the
+    //    swing itself.
+    //  - otherwise: whisper-slow, so the orientation estimate's lag distorts
+    //    tracking by well under 2%.
+    const errX = wrapDeg(az - this.refAz) - this.yawOffDeg;
+    const errY = (elev - this.refElev) - this.pitchOffDeg;
+    const err = Math.hypot(errX, errY);
+    const still = Math.abs(yawDps) < 12 && Math.abs(pitchDps) < 12;
+    const calm = Math.abs(yawDps) < 40 && Math.abs(pitchDps) < 40;
     this.stillMs = still ? this.stillMs + dt * 1000 : 0;
-    const tau = this.stillMs > 800 ? this.healTau : 8;
+    let tau = this.stillMs > 400 ? this.healTau : 8;
+    // At moderate rates the lag-induced phantom error stays under ~4°, so a
+    // 6° threshold only ever fast-heals genuine loss.
+    if (calm && err > 6) tau = Math.min(tau, clamp(48 / err, 0.8, 8));
     const k = clamp(dt / tau, 0, 1);
-    this.yawOffDeg += (wrapDeg(az - this.refAz) - this.yawOffDeg) * k;
-    this.pitchOffDeg += ((elev - this.refElev) - this.pitchOffDeg) * k;
+    this.yawOffDeg += errX * k;
+    this.pitchOffDeg += errY * k;
 
     // Positive yaw = counterclockwise from above = pointing left → cursor
     // left; positive pitch about user-right = pointing up → cursor up.
