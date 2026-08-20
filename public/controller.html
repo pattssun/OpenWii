@@ -47,44 +47,52 @@
   button { font: inherit; color: inherit; border: none; background: none; padding: 0; }
   button:active { }
 
-  /* Power — doubles as the connection light: soft blue when linked to the
-     PC, red when the server is unreachable. */
-  #row-top { width: 100%; display: flex; flex: none; }
+  /* Power — white face with the red icon, like the real one. Still doubles
+     as the connection light: soft blue halo when linked to the PC, red halo
+     when the server is unreachable. */
+  #row-top { width: 100%; display: flex; flex: none; position: relative;
+             align-items: flex-start; min-height: clamp(38px, 6vh, 48px); }
+  #pwr-wrap { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  #pwr-wrap small { font-size: 7px; font-weight: 700; letter-spacing: .14em;
+                    color: #93a3b4; }
   #power {
-    width: clamp(32px, 5vh, 40px); height: clamp(32px, 5vh, 40px); border-radius: 50%;
-    background: linear-gradient(180deg, #3a414b, #262c34);
-    color: #cfd6de; font-size: 16px;
-    box-shadow: inset 0 1px 0 #ffffff22, 0 2px 5px #0004;
-    transition: box-shadow .4s ease, color .4s ease;
+    width: clamp(30px, 4.6vh, 38px); height: clamp(30px, 4.6vh, 38px); border-radius: 50%;
+    background: linear-gradient(180deg, #ffffff, #e8edf2);
+    border: 1px solid #c6cfd9;
+    color: #d92b1f; font-size: 15px;
+    box-shadow: 0 2px 4px #0002, inset 0 1px 0 #fff;
+    transition: box-shadow .4s ease;
   }
-  #power:active { transform: translateY(1px); filter: brightness(1.25); }
-  #power.linked { color: #7fc4ff;
-    box-shadow: inset 0 1px 0 #ffffff22, 0 2px 5px #0004, 0 0 14px #45a6ff66; }
-  #power.err { color: #ff8d85;
-    box-shadow: inset 0 1px 0 #ffffff22, 0 2px 5px #0004, 0 0 14px #ff5f6d88; }
+  #power:active { transform: translateY(1px); }
+  #power.linked { box-shadow: 0 2px 4px #0002, inset 0 1px 0 #fff, 0 0 14px #45a6ff66; }
+  #power.err { box-shadow: 0 2px 4px #0002, inset 0 1px 0 #fff, 0 0 14px #ff5f6d99; }
+  #brand { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+           font-size: clamp(13px, 2vh, 16px); font-weight: 700; color: #aab7c4; }
 
   /* D-pad: a solid cross. Sized by viewport height so short phones still fit
      the whole face; segments are percentages of the pad, not pixels. */
   #dpad { position: relative; width: clamp(84px, 15vh, 128px); height: clamp(84px, 15vh, 128px); flex: none; }
   .dp {
     position: absolute; width: 34.4%; height: 34.4%;
-    background: linear-gradient(180deg, #343b44, #23282f);
-    box-shadow: inset 0 1px 0 #ffffff1e, 0 2px 4px #0005;
+    background: linear-gradient(180deg, #ffffff, #e6ebf0);
+    border: 1px solid #c6cfd9;
+    box-shadow: 0 2px 4px #0002, inset 0 1px 0 #fff;
   }
-  .dp:active { filter: brightness(1.35); }
+  .dp:active { filter: brightness(0.93); }
   .dp.u { left: 32.8%; top: 0;    border-radius: 10px 10px 0 0; }
   .dp.d { left: 32.8%; bottom: 0; border-radius: 0 0 10px 10px; }
   .dp.l { left: 0;     top: 32.8%; border-radius: 10px 0 0 10px; }
   .dp.r { right: 0;    top: 32.8%; border-radius: 0 10px 10px 0; }
-  .dp.c { left: 32.8%; top: 32.8%; border-radius: 0; box-shadow: none; pointer-events: none; }
+  .dp.c { left: 32.8%; top: 32.8%; border-radius: 0; box-shadow: none; border: none;
+          background: #f2f5f8; pointer-events: none; }
   .dp::after {
     content: ''; position: absolute; left: 50%; top: 50%; width: 0; height: 0;
-    border: 7px solid transparent; opacity: .5;
+    border: 7px solid transparent; opacity: .45;
   }
-  .dp.u::after { border-bottom-color: #10141c; transform: translate(-50%, -80%); }
-  .dp.d::after { border-top-color: #10141c;    transform: translate(-50%, -20%); }
-  .dp.l::after { border-right-color: #10141c;  transform: translate(-80%, -50%); }
-  .dp.r::after { border-left-color: #10141c;   transform: translate(-20%, -50%); }
+  .dp.u::after { border-bottom-color: #5a6c80; transform: translate(-50%, -80%); }
+  .dp.d::after { border-top-color: #5a6c80;    transform: translate(-50%, -20%); }
+  .dp.l::after { border-right-color: #5a6c80;  transform: translate(-80%, -50%); }
+  .dp.r::after { border-left-color: #5a6c80;   transform: translate(-20%, -50%); }
   .dp.c::after { display: none; }
 
   /* A — the hero button. */
@@ -106,9 +114,9 @@
   #btn-b {
     width: 62%; height: clamp(38px, 6vh, 46px);
     border-radius: 14px 14px 22px 22px; flex: none;
-    background: linear-gradient(180deg, #4a525c, #31383f);
-    box-shadow: inset 0 1px 0 #ffffff24, 0 3px 7px #0005;
-    color: #e8ecf4; font-size: 22px; font-weight: 700;
+    background: linear-gradient(180deg, #a7b0ba, #8a939d);
+    box-shadow: inset 0 1px 0 #ffffff44, 0 3px 7px #0003;
+    color: #fff; font-size: 22px; font-weight: 700;
   }
   #btn-b:active { transform: translateY(2px); filter: brightness(1.2); }
 
@@ -120,7 +128,9 @@
     border: 1px solid #c6cfd9; box-shadow: 0 2px 4px #0002, inset 0 1px 0 #fff;
     color: #5a6c80; font-size: 22px; font-weight: 700;
   }
-  #btn-home { width: clamp(40px, 6.4vh, 50px); height: clamp(40px, 6.4vh, 50px); font-size: 21px; }
+  #btn-home { width: clamp(40px, 6.4vh, 50px); height: clamp(40px, 6.4vh, 50px); font-size: 21px;
+    background: linear-gradient(180deg, #4a5560, #39424c); border-color: #2e363f;
+    color: #e8ecf4; }
   .pill:active { transform: scale(.92); box-shadow: 0 1px 2px #0002, inset 0 2px 6px #8fa1b444; }
   .pill small { display: block; font-size: 8px; font-weight: 600; letter-spacing: .04em;
                 color: #93a3b4; margin-top: -3px; }
@@ -146,8 +156,8 @@
   .num:active { transform: scale(.92); box-shadow: inset 0 2px 6px #8fa1b444; }
 
   /* Player LEDs. */
-  #brand { font-size: 15px; font-weight: 700; color: #aab7c4; letter-spacing: .01em; flex: none; }
-  #leds { display: flex; gap: 14px; flex: none; padding-bottom: 2px; }
+  #leds { display: flex; gap: 14px; flex: none;
+          margin-bottom: clamp(4px, 1.2vh, 12px); }
   #leds i {
     width: 13px; height: 8px; border-radius: 2.5px; background: #c3ccd5;
     box-shadow: inset 0 1px 1px #0003;
@@ -162,14 +172,11 @@
     20% { background: #45c1ff; box-shadow: 0 0 9px #45c1ffcc; }
   }
 
-  /* Short phones: every pixel goes to the buttons. */
-  @media (max-height: 700px) {
-    #brand { display: none; }
-  }
+
   /* Landscape / very short: drop the decorative rows, tuck 1 and 2 side by
      side, and let the big controls shrink further. */
   @media (max-height: 560px) {
-    #speaker, #brand { display: none; }
+    #speaker { display: none; }
     #remote { gap: 2px; padding: 8px 24px 6px; }
     #ones { flex-direction: row; gap: 10px; }
     #dpad { width: clamp(64px, 15vh, 128px); height: clamp(64px, 15vh, 128px); }
@@ -229,7 +236,10 @@
 <div id="app">
   <div id="stage">
     <div id="remote" class="asleep">
-      <div id="row-top"><button id="power" aria-label="power">⏻</button></div>
+      <div id="row-top">
+        <div id="pwr-wrap"><small>POWER</small><button id="power" aria-label="power">⏻</button></div>
+        <div id="brand">OpenWii</div>
+      </div>
 
       <div id="dpad">
         <button class="dp u" aria-label="up"></button>
@@ -266,7 +276,6 @@
       </div>
 
       <div class="sp"></div>
-      <div id="brand">OpenWii</div>
       <div id="leds" class="seek"><i></i><i></i><i></i><i></i></div>
     </div>
   </div>
