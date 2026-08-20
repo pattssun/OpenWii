@@ -23,14 +23,14 @@ export const BOMB_PENALTY = 10;        // practice mode: bombs cost points, not 
  * the flesh colour, not the rind: a watermelon splats red, a kiwi green.
  */
 export const FRUIT_TYPES = [
-  { name: 'watermelon', rind: 0x27691f, flesh: 0xf1373b, splat: 0xd92a35, r: 0.72 },
-  { name: 'pineapple', rind: 0xd9a13b, flesh: 0xf7de74, splat: 0xf0c945, r: 0.62 },
-  { name: 'strawberry', rind: 0xd8261f, flesh: 0xf7a9a0, splat: 0xd92a35, r: 0.48 },
-  { name: 'orange', rind: 0xf28511, flesh: 0xffb840, splat: 0xff9a1f, r: 0.52 },
-  { name: 'kiwi', rind: 0x7a5b39, flesh: 0x8cc63f, splat: 0x7fb832, r: 0.46 },
-  { name: 'lemon', rind: 0xf5d321, flesh: 0xfbe97b, splat: 0xf2d93b, r: 0.48 },
-  { name: 'apple', rind: 0x7bb92e, flesh: 0xf4f0d5, splat: 0xb9d152, r: 0.52 },
-  { name: 'peach', rind: 0xf5923e, flesh: 0xfad089, splat: 0xf5a623, r: 0.54 },
+  { name: 'watermelon', rind: 0x27691f, flesh: 0xf1373b, splat: 0xd92a35, r: 0.86 },
+  { name: 'pineapple', rind: 0xd9a13b, flesh: 0xf7de74, splat: 0xf0c945, r: 0.74 },
+  { name: 'strawberry', rind: 0xd8261f, flesh: 0xf7a9a0, splat: 0xd92a35, r: 0.58 },
+  { name: 'orange', rind: 0xf28511, flesh: 0xffb840, splat: 0xff9a1f, r: 0.62 },
+  { name: 'kiwi', rind: 0x7a5b39, flesh: 0x8cc63f, splat: 0x7fb832, r: 0.55 },
+  { name: 'lemon', rind: 0xf5d321, flesh: 0xfbe97b, splat: 0xf2d93b, r: 0.58 },
+  { name: 'apple', rind: 0x7bb92e, flesh: 0xf4f0d5, splat: 0xb9d152, r: 0.62 },
+  { name: 'peach', rind: 0xf5923e, flesh: 0xfad089, splat: 0xf5a623, r: 0.65 },
 ];
 
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -138,7 +138,7 @@ export class FruitNinja {
       y: -this.h / 2 - 0.8,
       vx: (-x / 4) * rand(0.4, 1.1),
       vy: Math.sqrt(2 * GRAVITY * rise),
-      r: isBomb ? 0.5 : kind.r,
+      r: isBomb ? 0.6 : kind.r,
       rot: rand(0, Math.PI * 2),
       spin: rand(-2.4, 2.4),
       spinAxis: { x: rand(-1, 1), y: rand(-1, 1), z: rand(-1, 1) },

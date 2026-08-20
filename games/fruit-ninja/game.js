@@ -795,8 +795,8 @@ audio.register('fn-throw', (a) => {
   a.tone({ freq: 300, slideTo: 540, dur: 0.16, type: 'sine', gain: 0.07 });
 });
 
-audio.register('fn-slice', (a, { size = 0.55, combo = 1 } = {}) => {
-  const depth = 1 - clamp((size - 0.45) / 0.3, 0, 1);   // big fruit = wetter, lower
+audio.register('fn-slice', (a, { size = 0.65, combo = 1 } = {}) => {
+  const depth = 1 - clamp((size - 0.55) / 0.31, 0, 1);   // big fruit = wetter, lower
   a.noise({ dur: 0.1, gain: 0.32, type: 'highpass', freq: 2400, sweepTo: 6000 });
   a.noise({
     dur: 0.16, gain: 0.3, type: 'bandpass',
