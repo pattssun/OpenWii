@@ -240,6 +240,16 @@ function registerDefaults(a) {
     a.tone({ freq: 330, dur: 0.5, type: 'sine', gain: 0.14, slideTo: 990 });
   });
 
+  // The channel-launch chime: a small rising fanfare timed to the banner
+  // expanding — C, G, high C with a bright airbrush over the top.
+  a.register('channel-launch', () => {
+    a.tone({ freq: 523.25, dur: 0.14, type: 'sine', gain: 0.2, attack: 0.008 });
+    a.tone({ freq: 783.99, dur: 0.18, type: 'sine', gain: 0.2, delay: 0.09, attack: 0.008 });
+    a.tone({ freq: 1046.5, dur: 0.45, type: 'sine', gain: 0.22, delay: 0.18, attack: 0.01 });
+    a.tone({ freq: 1568, dur: 0.3, type: 'sine', gain: 0.08, delay: 0.24 });
+    a.noise({ dur: 0.45, gain: 0.05, type: 'bandpass', freq: 1500, sweepTo: 5000, q: 1.2 });
+  });
+
   a.register('boot', () => {
     // Two soft, well-spaced chimes — the "everything is fine" sound.
     a.tone({ freq: 523.25, dur: 0.7, type: 'sine', gain: 0.22, attack: 0.02 });

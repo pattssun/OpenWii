@@ -1,4 +1,8 @@
 import * as THREE from '/vendor/three/three.module.js';
+import { consumeLaunchSplash } from '../../core/splash.js';
+
+// Carry the menu's launch banner across the navigation, then fade it out.
+consumeLaunchSplash();
 import { createChannel } from '../../core/channel.js';
 import { SwingDetector } from '../../core/gesture.js';
 import { Rally, TABLE, PLAYER_Z, AI_Z } from './logic.js';

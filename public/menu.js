@@ -689,11 +689,47 @@ function refreshArrows() {
   arrows.forEach(drawArrow);
 }
 
+/** A tile's current on-screen rect in CSS pixels. */
+function tileScreenRect(tile) {
+  const halfH = VIEW_H / 2;
+  const halfW = halfH * camera.aspect;
+  const w = ((TILE_W * L.scale) / (2 * halfW)) * window.innerWidth;
+  const h = ((TILE_H * L.scale) / (2 * halfH)) * window.innerHeight;
+  const cx = (tile.home.x / (2 * halfW) + 0.5) * window.innerWidth;
+  const cy = (0.5 - tile.home.y / (2 * halfH)) * window.innerHeight;
+  return { left: cx - w / 2, top: cy - h / 2, width: w, height: h };
+}
+
 function launch(tile) {
   launching = { tile, t: 0 };
-  audio.play('channel-open');
+  audio.play('channel-launch');
   audio.stopMusic();
   link.feedback({ type: 'launch', game: tile.game.slug });
+
+  // The launch banner: a DOM overlay that grows from the tile's exact rect
+  // to full screen. DOM, not the tile texture — the old zoom scaled a small
+  // canvas texture up 8× and arrived blurry; text and emoji stay crisp at
+  // any size here.
+  const [c0, c1] = CHANNEL_ART[tile.game.slug] || ['#9db8d9', '#6f8fbc'];
+  const r = tileScreenRect(tile);
+  const el = document.createElement('div');
+  el.id = 'launch';
+  el.style.cssText = `left:${r.left}px; top:${r.top}px; width:${r.width}px; height:${r.height}px;`
+    + `background:linear-gradient(180deg, ${c0}, ${c1});`;
+  el.innerHTML = `<div class="l-emoji">${tile.game.emoji || '🎮'}</div>`
+    + `<div class="l-title">${tile.game.title}</div>`;
+  document.body.appendChild(el);
+  void el.offsetWidth;               // commit the start rect before animating
+  el.classList.add('full');
+
+  // The receiving game page opens on this same banner and fades it out — one
+  // continuous motion across the navigation, no flash.
+  try {
+    sessionStorage.setItem('openwii.launch', JSON.stringify({
+      slug: tile.game.slug, title: tile.game.title, emoji: tile.game.emoji || '🎮',
+      c0, c1, t: Date.now(),
+    }));
+  } catch { /* storage may be unavailable; the splash just won't carry over */ }
 }
 
 // ── Layout ─────────────────────────────────────────────────────────────────
@@ -828,20 +864,13 @@ function step(now, dt) {
   barClock += dt;
   if (barClock > 0.2) { barClock = 0; drawBar(); }
 
-  // Zoom-to-fill: the selected channel grows to cover the screen, everything
-  // else fades, then we navigate.
+  // Launching: the DOM banner (see launch()) grows over the scene; the menu
+  // itself just fades away underneath, then we navigate.
   if (launching) {
     launching.t += dt;
     const k = Math.min(1, launching.t / 0.75);
     const ease = k * k * (3 - 2 * k);
-    const tile = launching.tile;
-    tile.mesh.position.set(
-      tile.home.x * (1 - ease), tile.home.y * (1 - ease), tile.home.z + ease * 7.5,
-    );
-    const s = L.scale * (1 + ease * 7);
-    tile.mesh.scale.set(s, s, 1);
     for (const other of tiles) {
-      if (other === tile) continue;
       other.mesh.material.opacity = 1 - ease;
       other.mesh.material.transparent = true;
     }
@@ -849,7 +878,7 @@ function step(now, dt) {
     barMesh.material.transparent = true;
     for (const a of arrows) { a.mesh.material.opacity = 1 - ease; a.mesh.material.transparent = true; }
     if (k >= 1) {
-      window.location.href = tile.game.url;
+      window.location.href = launching.tile.game.url;
       launching.t = -1e9;   // stop re-triggering while the browser navigates
     }
   }

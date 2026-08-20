@@ -1,4 +1,8 @@
 import * as THREE from '/vendor/three/three.module.js';
+import { consumeLaunchSplash } from '../../core/splash.js';
+
+// Carry the menu's launch banner across the navigation, then fade it out.
+consumeLaunchSplash();
 import { FruitNinja, FIELD_H } from './logic.js';
 import { Pointer } from '../../core/pointer.js';
 import { saveSensitivity, loadSensitivity } from '../../core/calibration.js';

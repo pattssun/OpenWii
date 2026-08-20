@@ -53,6 +53,21 @@
   }
   #debug.on { display: block; }
 
+  /* ── Launch banner: grows from the pressed tile to full screen ───────── */
+  #launch {
+    position: fixed; z-index: 30; border-radius: 18px; overflow: hidden;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 2vmin; box-shadow: 0 20px 60px #33507044;
+    transition: left .55s cubic-bezier(.3,.85,.3,1), top .55s cubic-bezier(.3,.85,.3,1),
+      width .55s cubic-bezier(.3,.85,.3,1), height .55s cubic-bezier(.3,.85,.3,1),
+      border-radius .55s ease;
+  }
+  #launch.full { left: 0 !important; top: 0 !important;
+    width: 100vw !important; height: 100vh !important; border-radius: 0; }
+  #launch .l-emoji { font-size: 17vmin; filter: drop-shadow(0 1.2vmin 2.5vmin rgba(0,0,0,.3)); }
+  #launch .l-title { font-size: 5vmin; font-weight: 700; color: #fff;
+    text-shadow: 0 .3vmin 1.2vmin rgba(0,0,0,.45); }
+
   /* Narrow windows: the pairing card shrinks and the desk-keyboard hint goes —
      it collides with the bar, and on a window that shape you're pairing a
      phone, not testing with a keyboard. */
