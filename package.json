@@ -3,6 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "description": "Motion-controlled games for your computer — your phone is the remote.",
+  "license": "MIT",
+  "author": "Patrick Sun",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pattssun/OpenWii.git"
+  },
   "type": "commonjs",
   "main": "server.js",
   "scripts": {
