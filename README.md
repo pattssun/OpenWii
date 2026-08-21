@@ -73,8 +73,7 @@ stream so it never feels laggy.
 | 🏎 **Kart Time Trial** | Tilt to steer. Three laps, one clock, and your own ghost. | [`games/kart`](games/kart) |
 
 Fruit Ninja is the most developed of the six, with multiplayer, criticals,
-combos, and a spec reverse-engineered from a demo video
-([`SPEC.md`](games/fruit-ninja/SPEC.md)).
+and combos.
 
 ## Adding a game
 

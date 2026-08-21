@@ -16,7 +16,7 @@ A game is any folder under `games/` containing an `index.html`. No registry to
 edit — the server scans on boot. `game.json` (title/tagline/emoji) is optional
 and only feeds the launcher card.
 
-Fruit Ninja was reverse-engineered from a demo video (ADR-029); its
+Fruit Ninja was reverse-engineered from a demo video; its
 `SPEC.md` / `PROMPT.md` live in `games/fruit-ninja/`.
 Source: https://www.instagram.com/reel/DZiAyThpC63/
 

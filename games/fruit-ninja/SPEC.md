@@ -2,7 +2,7 @@
 
 > A web-based Fruit Ninja clone that uses a smartphone as a wireless motion controller.
 
-_Reverse-engineered from a demo bookmark (https://www.instagram.com/reel/DZiAyThpC63/) by Gemini (ADR-029). Un-vetted — treat as a starting point, not ground truth._
+_Reverse-engineered from a demo video (https://www.instagram.com/reel/DZiAyThpC63/). Un-vetted: treat as a starting point, not ground truth._
 
 ## What it does
 
