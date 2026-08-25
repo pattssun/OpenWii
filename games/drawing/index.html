@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sketch — OpenWii</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden; cursor: none;
+    background: #ece7dc; color: #2b2b30;
+    font: 500 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    user-select: none;
+  }
+  canvas { display: block; position: absolute; inset: 0; width: 100%; height: 100%; }
+
+  #hud { position: absolute; inset: 0; pointer-events: none; }
+  #keys { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%);
+          font-size: 11px; color: #7a7466; }
+  #keys a { color: inherit; pointer-events: auto; }
+  #link { position: absolute; right: 30px; bottom: 24px; display: flex; align-items: center;
+          gap: 9px; font-size: 13px; color: #5d5748; background: #fffdf8cc;
+          border: 1px solid #d9d2c0; padding: 9px 14px; border-radius: 999px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #b3ac99; }
+  .dot.on { background: #2fb56b; }
+  #debug { position: absolute; right: 30px; top: 116px; margin: 0; display: none;
+           background: #fffdf8cc; border: 1px solid #d9d2c0; border-radius: 12px;
+           padding: 13px 15px; font: 12px/1.6 ui-monospace, Menlo, monospace;
+           color: #5d5748; white-space: pre; }
+  #debug.on { display: block; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud">
+  <div id="keys"><a href="/">← Games</a> · press <b>A</b> (or click) to put the pen down,
+    press again to lift · tools on the left · <b>D</b> debug</div>
+  <div id="link"><span class="dot" id="dot"></span><span id="link-t">no remote connected</span></div>
+  <pre id="debug"></pre>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script type="module" src="game.js"></script>
+</body>
+</html>

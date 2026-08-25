@@ -2,5 +2,6 @@
   "title": "Swordplay",
   "tagline": "Duel a rival on the water. Your phone is the blade.",
   "emoji": "⚔️",
-  "players": 1
+  "players": 1,
+  "hidden": true
 }

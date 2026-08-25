@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Alien Attack — OpenWii</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden; cursor: none;
+    background: #060915; color: #dfe7f5;
+    font: 500 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    user-select: none;
+  }
+  canvas { display: block; position: absolute; inset: 0; width: 100%; height: 100%; }
+
+  #hud { position: absolute; inset: 0; pointer-events: none; }
+  #card {
+    position: absolute; left: 28px; top: 24px; background: #0b1226cc;
+    border: 1px solid #2b3a5e; border-radius: 14px; padding: 12px 18px;
+  }
+  #score { font-size: 26px; font-weight: 800; }
+  #meta { font-size: 13px; color: #8fa3c9; }
+  #lives { position: absolute; right: 30px; top: 24px; font-size: 24px;
+           letter-spacing: 4px; filter: drop-shadow(0 2px 6px #000a); }
+  #popup {
+    position: absolute; left: 50%; top: 32%; transform: translateX(-50%);
+    font-size: 34px; font-weight: 900; color: #fff; text-shadow: 0 4px 14px #000a;
+    opacity: 0; transition: opacity .12s;
+  }
+  #popup.on { opacity: 1; }
+  #vignette { position: absolute; inset: 0; opacity: 0; transition: opacity .1s;
+              background: radial-gradient(ellipse at center, #0000 55%, #e2323255 100%); }
+  #vignette.on { opacity: 1; }
+  #keys { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%);
+          font-size: 11px; color: #7d90b5; }
+  #keys a { color: inherit; pointer-events: auto; }
+  #link { position: absolute; right: 30px; bottom: 24px; display: flex; align-items: center;
+          gap: 9px; font-size: 13px; color: #a9bcdc; background: #0b1226cc;
+          border: 1px solid #2b3a5e; padding: 9px 14px; border-radius: 999px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #4b5c80; }
+  .dot.on { background: #2fb56b; }
+  #debug { position: absolute; right: 30px; top: 66px; margin: 0; display: none;
+           background: #0b1226cc; border: 1px solid #2b3a5e; border-radius: 12px;
+           padding: 13px 15px; font: 12px/1.6 ui-monospace, Menlo, monospace;
+           color: #a9bcdc; white-space: pre; }
+  #debug.on { display: block; }
+
+  #overlay { position: absolute; inset: 0; display: grid; place-items: center; z-index: 5;
+             background: radial-gradient(ellipse at 50% 40%, #16224add, #060915f2 72%); }
+  #overlay.hide { display: none; }
+  .panel { text-align: center; max-width: 620px; padding: 0 30px; }
+  .panel h1 { font-size: 54px; margin: 0 0 8px; font-weight: 800; letter-spacing: -0.03em; }
+  .panel h1 em { font-style: normal;
+    background: linear-gradient(120deg, #6fe08f, #2fb56b);
+    -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .panel p { color: #9fb2d4; margin: 0 auto 18px; max-width: 470px; }
+  .grip {
+    display: inline-block; margin: 0 0 20px; padding: 10px 20px; border-radius: 999px;
+    background: #0b1226; border: 2px solid #2fb56b; color: #7fe0a1;
+    font-weight: 800; font-size: 16px;
+  }
+  .stat { display: inline-block; margin: 0 10px 20px; }
+  .stat b { display: block; font-size: 30px; }
+  .stat span { font-size: 12px; color: #8fa3c9; text-transform: uppercase; letter-spacing: .1em; }
+  .cta { font-size: 14px; color: #9fb2d4; }
+  .cta strong { color: #fff; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud">
+  <div id="vignette"></div>
+  <div id="card">
+    <div id="score">0</div>
+    <div id="meta">0 kills · 0m</div>
+  </div>
+  <div id="lives">💚💚💚</div>
+  <div id="popup"></div>
+  <div id="keys"><a href="/">← Games</a> · roll the tray to fly · <b>A</b>/Space fires ·
+    <b>1</b> re-zero · <b>I</b> invert steering · <b>D</b> debug</div>
+  <div id="link"><span class="dot" id="dot"></span><span id="link-t">no remote connected</span></div>
+  <pre id="debug"></pre>
+</div>
+
+<div id="overlay">
+  <div class="panel" id="panel">
+    <h1>👾 <em>Alien Attack</em></h1>
+    <div class="grip">Lay the phone FLAT like a tray 📱 — one hand on each end</div>
+    <p>Endless saucer waves. Roll the tray to fly — right end down banks
+       right — and press A to fire. They shoot back, and three hits ends
+       the run. Your pose at launch becomes “straight”; press 1 to re-zero.</p>
+    <div class="cta"><strong>A</strong> or <strong>Space</strong> to launch · <strong>B</strong> menu</div>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script type="module" src="game.js"></script>
+</body>
+</html>

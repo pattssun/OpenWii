@@ -97,6 +97,9 @@ let page = 0;
 /** Full-bleed art colours per channel — saturated, like real channel tiles. */
 const CHANNEL_ART = {
   'fruit-ninja': ['#ffb347', '#e8542f'],
+  'alien-attack': ['#a3dd6b', '#43a047'],
+  'shooting-range': ['#7fa8f4', '#3b5bd6'],
+  drawing: ['#d29bef', '#9152d1'],
   swordplay: ['#8fb3e0', '#4a6fa8'],
   'table-tennis': ['#4cc3ab', '#238f7a'],
   golf: ['#8fd05f', '#3f9b45'],

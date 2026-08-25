@@ -2,5 +2,6 @@
   "title": "Fruit Ninja",
   "tagline": "Swing the phone like a sword. Up to 4 blades, one board.",
   "emoji": "🍉",
-  "players": 4
+  "players": 4,
+  "order": 1
 }

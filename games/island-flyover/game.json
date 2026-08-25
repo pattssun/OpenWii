@@ -2,5 +2,6 @@
   "title": "Island Flyover",
   "tagline": "Bank, climb, dive. Thread all 20 rings over the island.",
   "emoji": "🛩",
-  "players": 1
+  "players": 1,
+  "hidden": true
 }

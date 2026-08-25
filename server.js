@@ -45,6 +45,10 @@ app.use('/audio', express.static(path.join(__dirname, 'audio'), { fallthrough: t
  * Discover games from disk rather than a hardcoded list: a game is any folder
  * under games/ with an index.html. Dropping in a new folder is the whole
  * install step.
+ *
+ * game.json may set `hidden: true` to keep a game off the menu (still
+ * reachable by URL) and `order` (lower first) to pin its menu position;
+ * unordered games follow alphabetically.
  */
 function listGames() {
   let entries;
@@ -63,7 +67,8 @@ function listGames() {
       } catch { /* game.json is optional */ }
       return { slug: e.name, url: `/games/${e.name}/`, ...meta };
     })
-    .sort((a, b) => a.title.localeCompare(b.title));
+    .filter((g) => !g.hidden)
+    .sort((a, b) => (a.order ?? 99) - (b.order ?? 99) || a.title.localeCompare(b.title));
 }
 
 app.get('/api/games', (_req, res) => res.json(listGames()));

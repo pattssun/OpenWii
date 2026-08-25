@@ -40,7 +40,10 @@ export function createChannel({
     onCommand: (cmd) => {
       if (cmd.type === 'button' && cmd.button === 'A') { audio.unlock(); onA(); }
       else if (cmd.type === 'button' && cmd.button === 'B') (onB || (() => goHome(audio)))();
-      else if (cmd.type === 'calibrate' || cmd.type === 'recentre') pointer.recentre();
+      else if (cmd.type === 'calibrate' || cmd.type === 'recentre') {
+        pointer.recentre();
+        onCommand(cmd);              // games with their own neutral re-zero too
+      }
       else if (cmd.type === 'speed') {
         pointer.sensitivity = clamp(pointer.sensitivity * (cmd.factor || 1), 0.2, 6);
         saveSensitivity(pointer.sensitivity);
@@ -61,7 +64,17 @@ export function createChannel({
     mouse.y = e.clientY / window.innerHeight;
     mouse.active = true;
   });
-  window.addEventListener('pointerdown', () => { audio.unlock(); onA(); });
+  window.addEventListener('pointerdown', (e) => {
+    // A click IS a position report — some input paths (touch, synthetic
+    // clicks) never send the mousemove first, so take it from the press.
+    if (Number.isFinite(e.clientX)) {
+      mouse.x = e.clientX / window.innerWidth;
+      mouse.y = e.clientY / window.innerHeight;
+      mouse.active = true;
+    }
+    audio.unlock();
+    onA();
+  });
 
   window.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
