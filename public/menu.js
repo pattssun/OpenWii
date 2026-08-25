@@ -562,6 +562,8 @@ function makeHand(slot) {
 
 // ── State ──────────────────────────────────────────────────────────────────
 const audio = new AudioEngine();
+// Dev console hook: inspect the audio pipeline from the console.
+window.__debug = { audio };
 
 /**
  * Per-phone input state, keyed by the server-assigned slot. Each phone gets
@@ -636,12 +638,13 @@ const link = new GameLink({
  * "sometimes silent until you happen to click".
  */
 function ensureAudio() {
+  // Pre-warm the menu's sampled cues BEFORE the unlock gate: decoding works
+  // on a suspended context, and waiting for a successful unlock meant the
+  // first launch click of a session could play before its sample existed —
+  // and these cues have no synth fallback, so that click was silent.
+  for (const cue of ['menu-hover', 'menu-select', 'menu-back']) audio.loadOverride(cue);
   audio.unlock().then((ok) => {
     if (!ok) return;
-    // Pre-warm the menu's sampled cues: without this, each cue's FIRST play
-    // of the session uses the synth fallback while the file is still being
-    // fetched — the one play the user most notices.
-    for (const cue of ['menu-hover', 'menu-select', 'menu-back']) audio.loadOverride(cue);
     // Never (re)start the theme once a launch is underway — a retry landing
     // after launch()'s stopMusic() brought the music back mid-banner.
     if (!audio.music && !launching && musicReady) audio.startMusic();

@@ -60,6 +60,15 @@ export class AudioEngine {
     // Muted: never even create an AudioContext, so a backgrounded tab has
     // nothing to keep alive.
     if (this.muted) return false;
+    if (!this.ensureCtx()) return false;
+    if (this.ctx.state === 'suspended') await this.ctx.resume();
+    return this.ctx.state === 'running';
+  }
+
+  /** Create the context and graph without resuming — decoding works on a
+      suspended context, so samples can load before any user gesture. */
+  ensureCtx() {
+    if (this.muted) return false;
     if (!this.ctx) {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (!Ctx) return false;
@@ -71,8 +80,7 @@ export class AudioEngine {
       this.musicGain.gain.value = 0.42;
       this.musicGain.connect(this.master);
     }
-    if (this.ctx.state === 'suspended') await this.ctx.resume();
-    return this.ctx.state === 'running';
+    return true;
   }
 
   register(name, synth) {
@@ -82,6 +90,7 @@ export class AudioEngine {
   /** Probe once for a file override; cache the answer either way. */
   async loadOverride(name) {
     if (this.overrides.has(name)) return this.overrides.get(name);
+    if (!this.ensureCtx()) return null;
     for (const ext of EXTENSIONS) {
       try {
         const res = await fetch(`${this.basePath}/${name}.${ext}`);
@@ -98,9 +107,13 @@ export class AudioEngine {
   play(name, opts = {}) {
     if (this.muted || !this.enabled || !this.ctx) return;
     // A context created before the user's first gesture starts suspended.
-    // Nudge it on every play: the first attempt after any interaction wins.
+    // Resume and REPLAY the cue once running — dropping it here made the
+    // click that launches a game silent whenever it was also the gesture
+    // that woke the context.
     if (this.ctx.state === 'suspended') {
-      this.ctx.resume().catch(() => {});
+      this.ctx.resume().then(() => {
+        if (this.ctx.state === 'running') this.play(name, opts);
+      }).catch(() => {});
       return;
     }
     const override = this.overrides.get(name);
