@@ -86,7 +86,9 @@ export function clearCalibration() {
  * calibration frame this is NOT scoped to a server run: a preference that
  * resets every time you restart the server is not a preference.
  */
-const SENSITIVITY_KEY = 'openwii.sensitivity.v1';
+// v2: the pointer's base speed was rebased (30°→20° per screen), so stored
+// v1 percentages meant a different physical speed and start fresh here.
+const SENSITIVITY_KEY = 'openwii.sensitivity.v2';
 
 export function saveSensitivity(v) {
   try { localStorage.setItem(SENSITIVITY_KEY, String(v)); } catch { /* ignore */ }

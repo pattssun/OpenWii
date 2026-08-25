@@ -70,7 +70,7 @@ function drive({
   yaw = () => 0, pitch = () => 0, grip = FLAT, device = DEVICE.spec,
   lagMs = 60, secs = 6, pointer = null, packetDelayMs = 25,
 }) {
-  const p = pointer || new Pointer({});
+  const p = pointer || new Pointer({ degPerScreen: 30 });
   const attitude = (t) => mul(mul(axisQ(2, yaw(t)), axisQ(0, pitch(t))), grip);
   const FRAME = 1000 / 60;
   const h = 1e-4;
@@ -102,13 +102,19 @@ const WANDER = {
   pitch: (t) => 8 * Math.sin(2 * Math.PI * 1.4 * t),
 };
 
+// The reference mapping every physics scenario here is authored at: 30° of
+// yaw per screen width, passed explicitly to each Pointer. The mapping is
+// linear in this parameter; the shipped DEFAULT is rebased to 20 (the old
+// "150% speed" as the new 100%) and pinned by its own test below.
+const DEG_PER_SCREEN = 30;
+
 /** Demeaned tracking error of cursor x against commanded yaw, screen units. */
 function yawError(track, fromMs) {
   const rows = track.filter((r) => r.ms >= fromMs);
   const mx = rows.reduce((s, r) => s + r.x, 0) / rows.length;
   const my = rows.reduce((s, r) => s + r.yaw, 0) / rows.length;
   let sum = 0;
-  for (const r of rows) sum += Math.abs((r.x - mx) - -((r.yaw - my) / 30));
+  for (const r of rows) sum += Math.abs((r.x - mx) - -((r.yaw - my) / DEG_PER_SCREEN));
   return sum / rows.length;
 }
 
@@ -209,7 +215,7 @@ test('no gyro at all still points the right way', () => {
   const my = rows.reduce((s, r) => s + r.yaw, 0) / rows.length;
   const cov = rows.reduce((s, r) => s + (r.x - mx) * -(r.yaw - my), 0);
   assert.ok(cov > 0, 'cursor moves the same way as the hand');
-  const expected = (2 * 12) / 30;
+  const expected = (2 * 12) / DEG_PER_SCREEN;
   assert.ok(Math.abs(travel(rows, 'x') - expected) / expected < 0.3,
     `travel within 30% of expected (${(travel(rows, 'x') * 100).toFixed(0)}%)`);
 });
@@ -262,7 +268,7 @@ test('absurd orientation lag degrades to correct-but-soft, never wrong', () => {
 test('the cursor is rock-still at rest', () => {
   let seed = 7;
   const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff) - 0.5;
-  const p = new Pointer({});
+  const p = new Pointer({ degPerScreen: 30 });
   let ms = 0;
   const xs = [];
   for (let i = 0; i < 60 * 5; i += 1, ms += 1000 / 60) {
@@ -328,7 +334,7 @@ test('when packets stop, the cursor freezes instead of coasting', () => {
 // the pointer sees is derived numerically, per the rules at the top.
 
 test('an over-swing past the edge comes back to centre', () => {
-  const p = new Pointer({});
+  const p = new Pointer({ degPerScreen: 30 });
   drive({ ...WANDER, secs: 4, pointer: p });          // earn gyro trust first
   assert.ok(p.gyroTrusted, 'trusted after wander');
   p.recentre();
@@ -346,7 +352,7 @@ test('an over-swing past the edge comes back to centre', () => {
 });
 
 test('drift from a huge clamped swing heals while the hand is still', () => {
-  const p = new Pointer({});
+  const p = new Pointer({ degPerScreen: 30 });
   drive({ ...WANDER, secs: 4, pointer: p });
   assert.ok(p.gyroTrusted, 'trusted after wander');
   p.recentre();
@@ -365,7 +371,7 @@ test('drift from a huge clamped swing heals while the hand is still', () => {
 });
 
 test('a held aim is never dragged — healing targets the pose, not the centre', () => {
-  const p = new Pointer({});
+  const p = new Pointer({ degPerScreen: 30 });
   drive({ ...WANDER, secs: 4, pointer: p });
   p.recentre();
   // Raise the aim 4° and hold it there, dead still, for seven seconds.
@@ -386,7 +392,7 @@ test('clamp loss is repaid mid-play — gentle aiming, no stillness required', (
   // The real complaint: fruit ninja never contains 800ms of true stillness,
   // so drift piled up until the player pressed re-centre by hand. A clamped
   // swing's loss must now heal during ordinary between-slash aiming motion.
-  const p = new Pointer({});
+  const p = new Pointer({ degPerScreen: 30 });
   drive({ ...WANDER, secs: 4, pointer: p });
   assert.ok(p.gyroTrusted, 'trusted after wander');
   p.recentre();
@@ -415,7 +421,7 @@ test('display lead cuts tracking delay during swings, and only during swings', (
   // never amplified (that bug shipped once; see the git history).
   const on = drive({ ...WANDER, secs: 6, packetDelayMs: 30 });
   const off = drive({
-    ...WANDER, secs: 6, packetDelayMs: 30, pointer: new Pointer({ displayLead: false }),
+    ...WANDER, secs: 6, packetDelayMs: 30, pointer: new Pointer({ degPerScreen: 30, displayLead: false }),
   });
   assert.ok(on.p.gyroTrusted && off.p.gyroTrusted, 'both trusted');
   const errOn = yawError(on.track, 3000);
@@ -429,7 +435,7 @@ test('display lead cuts tracking delay during swings, and only during swings', (
   });
   const slowOff = drive({
     yaw: (t) => 2 * Math.sin(2 * Math.PI * 0.5 * t), secs: 4, packetDelayMs: 30,
-    pointer: new Pointer({ displayLead: false }),
+    pointer: new Pointer({ degPerScreen: 30, displayLead: false }),
   });
   let maxDiff = 0;
   for (let i = 0; i < slowOn.track.length; i += 1) {
@@ -470,7 +476,7 @@ test('display lead does not shimmer: noisy gyro, smooth cursor', () => {
   seed = 11;
   const on = drive({ ...sweep });
   seed = 11;
-  const off = drive({ ...sweep, pointer: new Pointer({ displayLead: false }) });
+  const off = drive({ ...sweep, pointer: new Pointer({ degPerScreen: 30, displayLead: false }) });
   const rOn = roughness(on.track);
   const rOff = roughness(off.track);
   assert.ok(rOn < rOff * 1.35,
@@ -485,9 +491,14 @@ test('display lead does not shimmer: noisy gyro, smooth cursor', () => {
   seed = 11;
   const fOn = drive({ ...fast });
   seed = 11;
-  const fOff = drive({ ...fast, pointer: new Pointer({ displayLead: false }) });
+  const fOff = drive({ ...fast, pointer: new Pointer({ degPerScreen: 30, displayLead: false }) });
   const frOn = roughness(fOn.track);
   const frOff = roughness(fOff.track);
   assert.ok(frOn < frOff * 1.7,
     `fast swings stay clean: ${(frOn * 1e4).toFixed(2)} vs ${(frOff * 1e4).toFixed(2)} (×1e-4/frame²)`);
+});
+
+test('the default pointer speed is the rebased 20°-per-screen (old 150%)', () => {
+  assert.equal(new Pointer({}).degPerScreen, 20);
+  assert.equal(new Pointer({}).sensitivity, 1);
 });
