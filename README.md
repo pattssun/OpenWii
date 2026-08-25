@@ -66,14 +66,15 @@ stream so it never feels laggy.
 | | | |
 | --- | --- | --- |
 | 🍉 **Fruit Ninja** | Swing the phone like a sword. Slice fruit, dodge bombs. Up to 4 blades on one board. | [`games/fruit-ninja`](games/fruit-ninja) |
-| ⚔️ **Swordplay** | Duel a fencer: swing to strike, hold your blade to block. | [`games/swordplay`](games/swordplay) |
-| 🏓 **Table Tennis** | Track the ball, swing at contact for pace. First to 11. | [`games/table-tennis`](games/table-tennis) |
-| ⛳ **Golf** | Drive, approach, putt. Swing hard off the tee, soft on the green. | [`games/golf`](games/golf) |
-| 🛩 **Island Flyover** | Hold the phone flat like a paper plane and thread the rings. | [`games/island-flyover`](games/island-flyover) |
-| 🏎 **Kart Time Trial** | Tilt to steer. Three laps, one clock, and your own ghost. | [`games/kart`](games/kart) |
+| 👾 **Alien Attack** | Lay the phone flat like a tray: roll it to fly, press A to fire. Endless saucer waves, three lives. | [`games/alien-attack`](games/alien-attack) |
+| 🎯 **Shooting Range** | Sixty seconds of pop-up targets. Point and press A; the small ones pay five times the big ones. | [`games/shooting-range`](games/shooting-range) |
+| 🎨 **Sketch** | Point at the canvas, press A to put the pen down, press again to lift. Ten colors, three brushes, an eraser. | [`games/drawing`](games/drawing) |
 
-Fruit Ninja is the most developed of the six, with multiplayer, criticals,
-and combos.
+Fruit Ninja is the most developed of the four, with multiplayer, criticals,
+and combos. Five more experiments (swordplay, table tennis, golf, island
+flyover, kart) still live in `games/`: they are hidden from the menu with
+`"hidden": true` in their `game.json`, but each remains playable at its
+`/games/<slug>/` URL.
 
 ## Adding a game
 
@@ -89,7 +90,8 @@ games/your-game/
 ```
 
 `core/channel.js` gives you a calibrated pointer, the player link, and the home
-button in a few lines; see any of the six games for the pattern.
+button in a few lines; see any of the games for the pattern. `game.json` also
+takes `order` (lower comes first on the menu) and `hidden`.
 
 ## Name
 
