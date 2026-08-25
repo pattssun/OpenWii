@@ -382,6 +382,24 @@ async function requestSensors() {
   }, 1500);
 }
 
+/**
+ * Keep the remote's UI upright no matter how the phone is swung — a remote
+ * that flips into landscape mid-game is unusable. Browsers only allow
+ * orientation locking from fullscreen, so go fullscreen first; both calls
+ * are best-effort because iOS Safari implements neither (there the OS
+ * Control Centre rotation lock is the only option).
+ */
+async function lockUpright() {
+  try {
+    if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+      await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+    }
+    if (screen.orientation && screen.orientation.lock) {
+      await screen.orientation.lock('portrait');
+    }
+  } catch { /* unsupported (iOS) or denied — the phone's own lock still works */ }
+}
+
 els.enable.addEventListener('click', async () => {
   els.enable.disabled = true;
   phoneAudioUnlock();
@@ -394,6 +412,7 @@ els.enable.addEventListener('click', async () => {
     buzz([10, 40, 18]);
     speakerTalk(400);
     keepAwake();
+    lockUpright();
     // Zero the mapping the moment the sword goes live.
     socket.emit('command', { type: 'calibrate' });
   } catch (err) {
