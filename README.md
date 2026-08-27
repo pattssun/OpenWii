@@ -49,8 +49,7 @@ flowchart TD
     browser -. "rumble, per player" .-> phone
 ```
 
-The interesting part is `core/pointer.js`. A real Wii needs an IR sensor bar to
-know where the remote points; OpenWii replaces it with pure software. The
+A real Wii needs an IR sensor bar to know where the remote points; OpenWii replaces it with pure software. The
 engine learns each phone's gyro axis conventions from its own data at runtime
 (they genuinely differ between devices), heals drift back toward the true pose
 between swings, and dead-reckons the cursor slightly ahead of the packet
