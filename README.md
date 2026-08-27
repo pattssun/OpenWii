@@ -9,11 +9,6 @@ console, no extra hardware. Up to **four phones** can join the same screen.
 
 <!-- demo video: drag openwii_demo.mp4 into this line on github.com and it embeds -->
 
-> [!TIP]
-> Drop this repo into Claude Code or any AI coding agent and ask it questions:
-> how the pointer learns your grip, or how a folder becomes a channel. It's a
-> small codebase and it explains itself well.
-
 ## Run it
 
 ```bash
