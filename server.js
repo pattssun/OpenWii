@@ -104,12 +104,27 @@ app.get('/api/pairing', async (_req, res) => {
   }
 });
 
+// Only pages actually served by this box may open a socket — a wildcard origin
+// lets any third-party site's script connect and self-register as 'game' or
+// 'controller' (cross-site WebSocket hijacking), which is how role-spoofing
+// happens without ever touching the register handler itself.
+const allowedHosts = new Set(['localhost', '127.0.0.1', ...localAddresses()]);
+
 const io = new Server(server, {
   // Orientation samples are tiny and constant; skip the polling handshake.
   transports: ['websocket', 'polling'],
   pingInterval: 10000,
   pingTimeout: 5000,
-  cors: { origin: '*' },
+  cors: {
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true); // non-browser clients send no Origin header
+      try {
+        cb(null, allowedHosts.has(new URL(origin).hostname));
+      } catch {
+        cb(null, false);
+      }
+    },
+  },
 });
 
 /** socket.id → 'game' | 'controller' */
