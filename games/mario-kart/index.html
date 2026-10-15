@@ -37,7 +37,7 @@
         ><b id="lap">1 <small>/ 3</small></b>
       </div>
       <div id="position">8<sup>th</sup></div>
-      <canvas id="minimap" width="250" height="220"></canvas>
+      <canvas id="minimap" width="250" height="220" role="img" aria-label="Race minimap"></canvas>
       <div id="speed">
         <b id="speed-number">0</b><span>km/h</span>
         <div id="speed-bar"></div>
@@ -81,14 +81,19 @@
       <div id="mode-options" role="group" aria-label="Players">
         <button type="button" data-mode="solo" aria-pressed="true">1 PLAYER</button>
         <button type="button" data-mode="duo" aria-pressed="false">2 PLAYERS</button>
+        <button type="button" data-mode="quad" aria-pressed="false">4 PLAYERS</button>
       </div>
       <div id="duo-lobby" hidden>
         <label class="keyboard-test-option"><input type="checkbox" id="keyboard-test"> Test with one phone: keyboard Player 2</label>
         <p id="keyboard-test-help" hidden>P2: arrows choose / steer · Enter ready · Z gas · X brake / unready · Shift drift · Space item</p>
+        <label class="keyboard-test-option" hidden><input type="checkbox" id="quad-keyboard-test"> Test with one phone: keyboard Players 2–4</label>
+        <p id="quad-keyboard-help" hidden>Select P2, P3 or P4 below. Arrows choose / steer · Enter ready · Z gas · X brake / unready · Shift drift · Space item. Only the selected keyboard player moves; the others stay idle.</p>
         <p id="duo-instructions">Connect two phones. Hold each one sideways and level to calibrate, choose a driver with the crosspad, then press 2 on each phone.</p>
         <div class="duo-choices">
           <section class="duo-choice p1"><strong>P1 · RED</strong><img id="duo-portrait-0" alt=""><b id="duo-driver-0"></b><small id="duo-state-0"></small></section>
           <section class="duo-choice p2"><strong>P2 · BLUE</strong><img id="duo-portrait-1" alt=""><b id="duo-driver-1"></b><small id="duo-state-1"></small></section>
+          <section class="duo-choice p3" hidden><strong>P3 · GREEN</strong><img id="duo-portrait-2" alt=""><b id="duo-driver-2"></b><small id="duo-state-2"></small></section>
+          <section class="duo-choice p4" hidden><strong>P4 · YELLOW</strong><img id="duo-portrait-3" alt=""><b id="duo-driver-3"></b><small id="duo-state-3"></small></section>
         </div>
       </div>
       <div id="characters" role="group" aria-label="Choose character"></div>
@@ -97,6 +102,12 @@
         <span>RACE LENGTH</span>
         <button type="button" data-laps="1" aria-pressed="false">1 LAP</button>
         <button type="button" data-laps="3" aria-pressed="true">3 LAPS</button>
+        <div class="lap-stepper">
+          <button type="button" id="lap-decrease" aria-label="Fewer laps">−</button>
+          <input type="number" id="lap-count" min="1" max="20" step="1" value="3" aria-label="Number of laps (1 to 20)">
+          <button type="button" id="lap-increase" aria-label="More laps">+</button>
+          <span>LAPS · 1–20</span>
+        </div>
       </div>
       <button id="start">Confirm Driver <span>② OK</span></button>
       <p id="menu-hint">Crosspad to choose · ② Confirm driver</p>
@@ -108,9 +119,18 @@
         ← → steer · Z gas · X brake · Shift drift · Space item
       </p>
     </div>
+    <div id="quad-test-controls" hidden role="group" aria-label="Keyboard test player">
+      <span>KEYBOARD</span>
+      <button type="button" data-keyboard-slot="1" aria-pressed="true">P2 · BLUE</button>
+      <button type="button" data-keyboard-slot="2" aria-pressed="false">P3 · GREEN</button>
+      <button type="button" data-keyboard-slot="3" aria-pressed="false">P4 · YELLOW</button>
+      <button type="button" id="quad-ready-all">Ready P2–P4</button>
+    </div>
     <div id="duo-hud" hidden>
       <section class="duo-player p1" id="duo-hud-0"><header>P1 · RED <span id="duo-name-0"></span></header><div class="duo-rank" id="duo-rank-0"></div><div class="duo-info"><div class="duo-counter"><span>LAP</span><b id="duo-lap-0"></b></div><div class="duo-counter duo-coins"><span>COINS</span><b id="duo-coins-0"></b></div><div class="duo-counter"><b id="duo-speed-0"></b><span>km/h</span></div></div><div class="duo-item" id="duo-item-0"></div><div class="duo-finish" id="duo-finish-0" hidden>FINISH!</div></section>
       <section class="duo-player p2" id="duo-hud-1"><header>P2 · BLUE <span id="duo-name-1"></span></header><div class="duo-rank" id="duo-rank-1"></div><div class="duo-info"><div class="duo-counter"><span>LAP</span><b id="duo-lap-1"></b></div><div class="duo-counter duo-coins"><span>COINS</span><b id="duo-coins-1"></b></div><div class="duo-counter"><b id="duo-speed-1"></b><span>km/h</span></div></div><div class="duo-item" id="duo-item-1"></div><div class="duo-finish" id="duo-finish-1" hidden>FINISH!</div></section>
+      <section class="duo-player p3" id="duo-hud-2" hidden><header>P3 · GREEN <span id="duo-name-2"></span></header><div class="duo-rank" id="duo-rank-2"></div><div class="duo-info"><div class="duo-counter"><span>LAP</span><b id="duo-lap-2"></b></div><div class="duo-counter duo-coins"><span>COINS</span><b id="duo-coins-2"></b></div><div class="duo-counter"><b id="duo-speed-2"></b><span>km/h</span></div></div><div class="duo-item" id="duo-item-2"></div><div class="duo-finish" id="duo-finish-2" hidden>FINISH!</div></section>
+      <section class="duo-player p4" id="duo-hud-3" hidden><header>P4 · YELLOW <span id="duo-name-3"></span></header><div class="duo-rank" id="duo-rank-3"></div><div class="duo-info"><div class="duo-counter"><span>LAP</span><b id="duo-lap-3"></b></div><div class="duo-counter duo-coins"><span>COINS</span><b id="duo-coins-3"></b></div><div class="duo-counter"><b id="duo-speed-3"></b><span>km/h</span></div></div><div class="duo-item" id="duo-item-3"></div><div class="duo-finish" id="duo-finish-3" hidden>FINISH!</div></section>
     </div>
     <div id="track-label">
       <span>MUSHROOM CUP</span><b>Mario Kart Stadium</b

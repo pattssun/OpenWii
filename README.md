@@ -32,7 +32,7 @@ play.
 
 | Game | How to play | Players |
 | --- | --- | --- |
-| 🏎️ **[Mario Kart](games/mario-kart/README.md)** | Hold your phone sideways to steer, drift, boost and use items. The linked guide covers controls and included assets. | 1–2 humans; CPUs fill 8 racers |
+| 🏎️ **[Mario Kart](games/mario-kart/README.md)** | Hold your phone sideways to steer, drift, boost and use items. The linked guide covers controls and included assets. | 1, 2 or 4 humans; CPUs fill 8 racers |
 | 🍉 **[Fruit Ninja](games/fruit-ninja/)** | Swing to slice fruit, dodge bombs and build combos. | Up to 4 |
 | 👾 **[Alien Attack](games/alien-attack/)** | Tilt to fly and press A to fire. | 1 |
 | 🎯 **[Shooting Range](games/shooting-range/)** | Point and press A to hit targets against the clock. | 1 |

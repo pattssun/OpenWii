@@ -1,7 +1,7 @@
 # Mario Kart for OpenWii
 
 A fan-made browser racing game with your phone as the steering wheel. Choose
-one of eight drivers and race one or two human players plus CPU opponents for one or three laps, with
+one of eight drivers and race one, two or four human players plus CPU opponents for 1–20 laps, with
 items, drifting, mini-turbos, anti-gravity and gliding.
 
 From the repository root:
@@ -29,8 +29,10 @@ its physical button arrangement when the browser changes orientation; on iPad,
 the controls scale up to fit the screen.
 
 1. Choose a driver with the crosspad and press **2** to confirm.
-2. Choose **1 lap or 3 laps** with left/right, then press **2** again to start.
+2. Choose **1–20 laps** with left/right, then press **2** again to start.
    The game remembers your lap choice. Press **1** here to change driver.
+   On the computer, use the lap number field or **− / +** buttons; the quick
+   **1 LAP / 3 LAPS** buttons remain available. This setting applies to all racers.
 3. Hold the phone level and still for a moment. The countdown waits until the
    steering wheel has a stable neutral position. Hold **2** after GO to accelerate.
 
@@ -65,6 +67,10 @@ level until each shows wheel ready, then press **2** on each phone. Drivers must
 be distinct. The computer's race length buttons apply to both players.
 
 Each player has a separate camera, item, position, lap, coins, and speed display.
+Two- and four-player races show a small minimap inside every player's view,
+with human markers matching the player colors and a white ring around that
+view's player. Each player's item
+slot uses the solo game's animated roulette and item artwork.
 Two humans race with six CPU racers. If a phone disconnects or stops streaming
 motion, the race pauses. Reconnect the same phone, hold it level until its wheel
 is ready, then press **2** to resume. Phone identity and player slot persist for
@@ -86,6 +92,43 @@ by default and does not reserve a phone slot. To return to two-phone play,
 untick it in the lobby. It exercises split-screen racing with one real phone;
 it does not test a second phone's sensors or connection.
 
+## Four players
+
+### Test four players with one phone
+
+Choose **4 PLAYERS**, then tick **Test with one phone: keyboard Players 2–4**.
+Your phone stays red P1 and must calibrate and ready normally. Use the computer
+buttons in the lobby to select **P2**, **P3** or **P4**. The arrows choose that
+player's driver; **Enter** readies them, and **X** cancels their readiness.
+Alternatively, click **Ready P2–P4** to ready all three computer players at once.
+Press **2** on your phone when ready to start.
+
+During the race, select P2, P3 or P4 using the buttons near the bottom. For the selected
+player, use **arrows** to steer, **Z** for gas, **X** for brake, **Shift** for
+drift and **Space** for an item. Only the selected computer player receives
+keyboard input; the others stay idle. Your phone continues controlling P1.
+Switching players releases held keyboard controls. **Esc** pauses and **Enter**
+resumes; losing P1's phone still pauses the race. This option does not reserve
+extra phone slots and is off by default. Untick it in the lobby for four-phone
+play. It tests the four views and racer controls, not three extra phone sensors.
+
+### Four-phone play
+
+Choose **4 PLAYERS** in the lobby and connect four phones to the same server.
+The first connected phone is red P1 (top left), then blue P2 (top right), green
+P3 (bottom left), and yellow P4 (bottom right). Each phone's label shows its
+assigned color and driver. The phones choose four distinct drivers with their
+crosspads. Hold every phone sideways and level until its wheel is ready, then
+press **2** on each one. The race starts after all four have confirmed. The
+computer's race length choice applies to everyone.
+
+Four humans and four CPU racers share one race. Each screen quarter has its own
+camera, position, lap, coins, speed, item and finish display. If any phone
+disconnects or stops sending motion, the race pauses. Reconnect that original
+phone, level all wheels, then press **2** or **Enter** to resume. Phone slots stay
+reserved for the server run. **Race Again** returns all four players to the
+lobby to choose drivers and ready up again.
+
 ## Graphics and performance
 
 Open **GRAPHICS** at the top right to see live FPS, frame time, render resolution,
@@ -100,8 +143,8 @@ bar to reveal it. Graphics changes apply immediately and are remembered.
 
 Resolution preserves the window's aspect ratio and does not exceed the pixel
 budget, including on high-DPI displays. The HUD remains at native resolution.
-Two-player mode uses a combined 720p budget on Performance and up to 1080p on
-Balanced or High, with direct side-by-side views and no postprocessing, dynamic
+Two and four-player modes use a combined 720p budget on Performance and up to 1080p on
+Balanced or High, with direct split views and no postprocessing, dynamic
 shadows, or live stadium screens. The graphics preset is retained for the next
 single-player race.
 

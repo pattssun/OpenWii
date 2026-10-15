@@ -1,4 +1,33 @@
-# Mario Kart: two-player local split screen
+# Mario Kart: local split screen for up to four players
+
+## Current extension: four players
+
+The user has authorized moving the existing two-player implementation to four
+players. Preserve the requirements below as the two-player baseline and extend
+them as follows; this section supersedes the former four-player exclusion.
+
+- Retain solo and two-player options; add an explicit four-player option.
+- Four players race in a 2 by 2 grid: P1 red top left, P2 blue top right,
+  P3 green bottom left, P4 yellow bottom right. Each view has a matching outline,
+  readable native-style HUD, independent camera and finish indication.
+- Four distinct drivers, four independently calibrated/motion-ready phones and
+  four ready confirmations are required for the normal four-player countdown.
+- One shared eight-racer simulation has four humans and four CPUs. All input,
+  item edges, feedback, recentering, finishes and connection safety apply to
+  all four players. Resume requires all intended participants and live input.
+- Phone labels must match player colors; retain the latest drift-button position
+  and steering sensitivity. Preserve the explicit keyboard P2 test in duo mode.
+- Provide an explicit, off-by-default one-phone quad test: real P1 phone plus
+  local keyboard P2–P4, selectable on the computer with independent inputs and
+  readiness. Do not reserve extra relay slots. Normal four-phone mode retains
+  its full connection/calibration gates; losing the real P1 phone still pauses.
+- Keep bounded total rendering cost, correct track rendering in Performance,
+  and per-view visibility. Do not multiply simulation/animation updates by views.
+- Extend automated coverage to all four slots, readiness, independent controls,
+  finish/results and reconnect safety. Exercise the actual relay/browser flow
+  with simulated phones and visually inspect four-view screenshots. Measure a
+  bounded four-view rendering run and report hardware and simulation limitations.
+- Update user documentation. Do not commit or leave test servers running.
 
 ## Objective
 

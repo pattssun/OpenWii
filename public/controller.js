@@ -152,8 +152,9 @@ function showPlayerLabel(label, color) {
 }
 socket.on('slot', ({ slot }) => {
   playerSlot = slot;
-  showPlayerLabel(`P${slot + 1} · ${slot === 0 ? 'RED' : slot === 1 ? 'BLUE' : 'PLAYER'}`,
-    slot === 0 ? '#ff5267' : slot === 1 ? '#5eaaff' : '#7fb7ff');
+  const colors = ['#ff5267', '#5eaaff', '#63d978', '#ffe067'];
+  const names = ['RED', 'BLUE', 'GREEN', 'YELLOW'];
+  showPlayerLabel(`P${slot + 1} · ${names[slot] || 'PLAYER'}`, colors[slot] || '#7fb7ff');
   els.player.classList.remove('hide');
   syncLeds();
 });

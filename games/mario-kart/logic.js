@@ -1,4 +1,5 @@
 import {sourceJumpLaunch} from "./source-jump.js";
+import { normalizeLaps } from './race-settings.js';
 import { stepSourceGlide } from './glide.js';
 import { contactResponse } from "./contact-response.js";
 import { roadFrame } from "./visual-frame.js";
@@ -140,7 +141,7 @@ function makeRacer(character, i) {
 }
 export class Race {
   constructor({ seed = 381, character = "mario", characters, humanCount, laps = 3, onEvent = () => {} } = {}) {
-    this.laps = laps === 1 ? 1 : 3;
+    this.laps = normalizeLaps(laps);
     this.finishedAt = null;
     this.seed = seed;
     this.rng = seeded(seed);
@@ -150,7 +151,8 @@ export class Race {
     this.raceTime = 0;
     this.accumulator = 0;
     const requested = Array.isArray(characters) ? characters : [character];
-    this.humanCount = humanCount === 2 || requested.length === 2 ? 2 : 1;
+    this.humanCount = humanCount === 4 || requested.length === 4 ? 4 :
+      humanCount === 2 || requested.length === 2 ? 2 : 1;
     const selected = [];
     for (const id of requested.slice(0, this.humanCount)) {
       const choice = CHARACTERS.find((c) => c.id === id);

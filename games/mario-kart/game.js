@@ -1,4 +1,5 @@
 import {itemRoulette} from "./item-roulette.js";
+import { normalizeLaps } from './race-settings.js';
 import { QUALITY, renderScale, duoRenderScale, gpuInfo, loadQuality, performanceMeter } from './graphics.js';
 import {raceEffects} from "./race-effects.js";
 import {itemPortraits} from "./item-portraits.js";
@@ -53,6 +54,7 @@ import { addAtmosphere } from "./atmosphere.js";
 import { roadFrame, chasePose, cameraClearance } from "./visual-frame.js";
 import { WheelInput } from "./input.js";
 import { DuoLobby } from './duo-lobby.js';
+import { splitViewport } from './split-viewport.js';
 import { KartAudio } from "./audio.js";
 import {
   proceduralKart,
@@ -69,6 +71,13 @@ const $ = (id) => document.getElementById(id),
 await loadSourcePortraits();
 const renderedItemIcons=itemPortraits();
 const updateItemReel=itemRoulette($("item-icon"),{...ITEM_ICONS,...renderedItemIcons},ITEMS);
+const splitItemReels = Array.from({length:4}, (_, slot) => {
+  const frame = $(`duo-item-${slot}`);
+  const icon = document.createElement('div');
+  icon.className = 'split-item-icon';
+  frame.replaceChildren(icon);
+  return itemRoulette(icon, {...ITEM_ICONS,...renderedItemIcons}, ITEMS);
+});
 const updateBoostScreen=boostScreen($("speed-lines"));
 let boostFeedback={strength:0,kick:0};
 window.addEventListener("error", (e) => {
@@ -84,6 +93,9 @@ const renderer = new THREE.WebGLRenderer({
 let qualityName = loadQuality();
 let quality = QUALITY[qualityName];
 let mode = 'solo';
+const playerColors = ['#ff5267', '#5eaaff', '#63d978', '#ffe067'];
+const activeCount = () => mode === 'quad' ? 4 : mode === 'duo' ? 2 : 1;
+const splitMode = () => mode !== 'solo';
 const gpu = gpuInfo(renderer.getContext());
 renderer.setPixelRatio(renderScale(innerWidth, innerHeight, devicePixelRatio, quality));
 renderer.setSize(innerWidth, innerHeight);
@@ -102,6 +114,8 @@ const camera = new THREE.PerspectiveCamera(
   1100,
 );
 const camera2 = camera.clone();
+const camera3 = camera.clone();
+const camera4 = camera.clone();
 const pmrem = new THREE.PMREMGenerator(renderer);
 const room = new RoomEnvironment();
 scene.environment = pmrem.fromScene(room, 0.04).texture;
@@ -195,30 +209,36 @@ if (world.source) {
   camera.updateProjectionMatrix();
   camera2.far = 2500;
   camera2.updateProjectionMatrix();
+  for (const viewCamera of [camera3, camera4]) {
+    viewCamera.far = 2500;
+    viewCamera.updateProjectionMatrix();
+  }
 }
 // The source stadium has 16:9 panels; generated scenery uses 4:3 panels.
 const broadcast = stadiumBroadcast(renderer, scene, world.screenMaterials,
   world.source ? {width:768,height:432} : undefined);
 function applyGraphics() {
   quality = QUALITY[qualityName];
-  const scale = mode === 'duo'
+  const scale = splitMode()
     ? duoRenderScale(innerWidth, innerHeight, devicePixelRatio, quality)
     : renderScale(innerWidth, innerHeight, devicePixelRatio, quality);
   renderer.setPixelRatio(scale);
   renderer.setSize(innerWidth, innerHeight);
-  camera.aspect = (mode === 'duo' ? innerWidth / 2 : innerWidth) / innerHeight;
+  camera.aspect = (splitMode() ? innerWidth / 2 : innerWidth) / (mode === 'quad' ? innerHeight / 2 : innerHeight);
   camera.updateProjectionMatrix();
-  camera2.aspect = (innerWidth / 2) / innerHeight;
-  camera2.updateProjectionMatrix();
+  for (const viewCamera of [camera2, camera3, camera4]) {
+    viewCamera.aspect = (innerWidth / 2) / (mode === 'quad' ? innerHeight / 2 : innerHeight);
+    viewCamera.updateProjectionMatrix();
+  }
   for (const target of [composer.renderTarget1, composer.renderTarget2]) {
-    const samples = mode === 'duo' ? 0 : Math.min(quality.samples, renderer.capabilities.maxSamples);
+    const samples = splitMode() ? 0 : Math.min(quality.samples, renderer.capabilities.maxSamples);
     if (target.samples !== samples) { target.samples = samples; target.dispose(); }
   }
   composer.setPixelRatio(scale);
   composer.setSize(innerWidth, innerHeight);
   ambientOcclusion.enabled = mode === 'solo' && quality.ao;
   bloom.enabled = mode === 'solo' && quality.bloom;
-  const shadowsEnabled = mode !== 'duo' && quality.shadows;
+  const shadowsEnabled = !splitMode() && quality.shadows;
   if (renderer.shadowMap.enabled !== shadowsEnabled) {
     renderer.shadowMap.enabled = shadowsEnabled;
     // Shadow support is compiled into material shaders. Refresh the cached
@@ -236,7 +256,7 @@ function applyGraphics() {
     key.shadow.map = null;
   }
   renderer.shadowMap.needsUpdate = true;
-  broadcast.setRate(mode === 'duo' ? 0 : quality.broadcastHz);
+  broadcast.setRate(splitMode() ? 0 : quality.broadcastHz);
   $('graphics-quality').value = qualityName;
 }
 applyGraphics();
@@ -320,9 +340,9 @@ for (const { mat, geos, cast } of staticGroups.values()) {
   scene.add(m);
   geos.forEach((x) => x.dispose());
 }
-const lobby = new DuoLobby();
+let lobby = new DuoLobby();
 let selected = "mario",
-  selectedLaps = localStorage.getItem("openwii.kart.laps") === "1" ? 1 : 3,
+  selectedLaps = normalizeLaps(localStorage.getItem("openwii.kart.laps")),
   paused = false,
   race,
   noticeUntil = 0,
@@ -335,27 +355,37 @@ const audio = new KartAudio(),
     invert: localStorage.getItem("openwii.chargeInvert2") === "1",
   }),
   keys = new Set();
-const wheels = [wheel, new WheelInput()];
-const captureUntils = [performance.now() + 3000, performance.now() + 3000];
-const duoItemPulses = [false, false], lastDuoItems = [false, false];
+const wheels = [wheel, new WheelInput(), new WheelInput(), new WheelInput()];
+const captureUntils = Array(4).fill(performance.now() + 3000);
+const duoItemPulses = Array(4).fill(false), lastDuoItems = Array(4).fill(false);
 let duoSignalGraceUntil = 0;
 let presenceSlots = [];
 let keyboardPlayer2 = false;
+let quadKeyboardTest = false, keyboardSlot = 1;
+const keyboardP2Active = slot => (mode === 'duo' && keyboardPlayer2 && slot === 1) ||
+  (mode === 'quad' && quadKeyboardTest && slot >= 1 && slot < 4);
 function duoSlots() {
-  if (!keyboardPlayer2) return presenceSlots;
-  return [presenceSlots[0], { slot: 1, occupied: true, identity: 'local-keyboard-player-2' }];
+  return Array.from({length: activeCount()}, (_, slot) => keyboardP2Active(slot)
+    ? { slot, occupied: true, identity: `local-keyboard-player-${slot + 1}` }
+    : presenceSlots[slot]);
 }
 function duoRemote(slot, now) {
-  if (keyboardPlayer2 && slot === 1) return {
-    live: true, status: 'Keyboard test controller',
-    steer: Number(keys.has('ArrowRight')) - Number(keys.has('ArrowLeft')),
-    gas: keys.has('KeyZ'), brake: keys.has('KeyX'),
-    drift: keys.has('ShiftLeft') || keys.has('ShiftRight'), item: false,
+  const selected = mode === 'duo' || slot === keyboardSlot;
+  if (keyboardP2Active(slot)) return {
+    live: true, status: selected ? 'Keyboard test controller' : 'Keyboard test · idle',
+    steer: selected ? Number(keys.has('ArrowRight')) - Number(keys.has('ArrowLeft')) : 0,
+    gas: selected && keys.has('KeyZ'), brake: selected && keys.has('KeyX'),
+    drift: selected && (keys.has('ShiftLeft') || keys.has('ShiftRight')), item: false,
   };
   return wheels[slot].read(now);
 }
 function duoMotionReady(slot, now) {
-  return (keyboardPlayer2 && slot === 1) || (wheels[slot].armed && wheels[slot].read(now).live);
+  return keyboardP2Active(slot) || (wheels[slot].armed && wheels[slot].read(now).live);
+}
+function splitRemoteStatus(slot, remote) {
+  if (keyboardP2Active(slot)) return remote.status;
+  if (!presenceSlots[slot]?.occupied) return 'Connect phone';
+  return remote.live ? remote.status : 'Wheel signal lost';
 }
 let captureUntil = performance.now() + 3000,
   usingPhone = false,
@@ -382,8 +412,8 @@ const shadowTexture = canvasTexture(64, 64, (ctx, w, h) => {
 function constructRace() {
   race = new Race({
     character: selected,
-    characters: mode === 'duo' ? lobby.characters : undefined,
-    humanCount: mode === 'duo' ? 2 : 1,
+    characters: splitMode() ? lobby.characters : undefined,
+    humanCount: activeCount(),
     laps: selectedLaps,
     seed: new URLSearchParams(location.search).has("evidence")
       ? 42
@@ -461,8 +491,8 @@ function constructRace() {
 }
 const link = new GameLink({
   onOrientation: (sample, slot) => {
-    if (mode === 'duo' && keyboardPlayer2 && slot === 1) return;
-    if (slot < 0 || slot > (mode === 'duo' ? 1 : 0)) return;
+    if (keyboardP2Active(slot)) return;
+    if (slot < 0 || slot >= activeCount()) return;
     if (mode === 'solo') usingPhone = true;
     wheels[slot].sample(sample, performance.now(), {
       canCapture:
@@ -470,14 +500,14 @@ const link = new GameLink({
         race?.state === "countdown" ||
         performance.now() < (mode === 'solo' ? captureUntil : captureUntils[slot]),
     });
-    if (mode === 'duo' && race?.state === 'ready') syncDuoLobby();
+    if (splitMode() && race?.state === 'ready') syncDuoLobby();
   },
   onCommand: (cmd, slot) => {
-    if (mode === 'duo' && keyboardPlayer2 && slot === 1) return;
-    if (slot < 0 || slot > (mode === 'duo' ? 1 : 0)) return;
+    if (keyboardP2Active(slot)) return;
+    if (slot < 0 || slot >= activeCount()) return;
     const now = performance.now();
     wheels[slot].command(cmd, now);
-    if (mode === 'duo') {
+    if (splitMode()) {
       if (cmd.type === 'recentre' || cmd.type === 'calibrate') {
         wheels[slot].reset();
         captureUntils[slot] = now + 10000;
@@ -521,9 +551,10 @@ const link = new GameLink({
   },
   onPresence: (p) => {
     presenceSlots = p.slots || [];
-    if (mode === 'duo') {
-      $('connection').textContent = `P1 ${presenceSlots[0]?.occupied ? 'CONNECTED' : 'WAITING'} · P2 ${keyboardPlayer2 ? 'KEYBOARD TEST' : presenceSlots[1]?.occupied ? 'CONNECTED' : 'WAITING'}`;
-      for (let slot = 0; slot < 2; slot++) if (!presenceSlots[slot]?.occupied) wheels[slot].release();
+    if (splitMode()) {
+      $('connection').textContent = splitConnectionLabel();
+      for (let slot = 0; slot < activeCount(); slot++)
+        if (!keyboardP2Active(slot) && !presenceSlots[slot]?.occupied) wheels[slot].release();
       if (race && !['ready', 'results'].includes(race.state) && !lobby.sameParticipants(duoSlots()))
         pause('A player disconnected. The same phones must reconnect.');
       syncDuoLobby();
@@ -544,14 +575,16 @@ const link = new GameLink({
 });
 function sendProfile() {
   link.feedback({ type: "controller-profile", profile: "wheel", slot: 0 });
-  if (mode === 'duo' && !keyboardPlayer2) {
-    link.feedback({ type: 'controller-profile', profile: 'wheel', slot: 1 });
-    link.feedback({ type: 'controller-player', slot: 1,
-      playerLabel: `P2 · ${CHARACTERS.find(c => c.id === lobby.characters[1]).name}`, playerColor: '#5eaaff' });
+  for (let slot = 1; slot < 4; slot++) {
+    link.feedback({ type: 'controller-profile', profile: slot < activeCount() && !keyboardP2Active(slot) ? 'wheel' : 'default', slot });
   }
-  link.feedback({ type: 'controller-player', slot: 0,
-    playerLabel: `P1 · ${mode === 'duo' ? CHARACTERS.find(c => c.id === lobby.characters[0]).name : CHARACTERS.find(c => c.id === selected).name}`,
-    playerColor: '#ff5267' });
+  for (let slot = 0; slot < activeCount(); slot++) {
+    if (keyboardP2Active(slot)) continue;
+    const characterId = splitMode() ? lobby.characters[slot] : selected;
+    link.feedback({ type: 'controller-player', slot,
+      playerLabel: `P${slot + 1} · ${CHARACTERS.find(c => c.id === characterId).name}`,
+      playerColor: playerColors[slot] });
+  }
 }
 const profileTimer = setInterval(sendProfile, 850);
 function onEvent(e) {
@@ -580,7 +613,7 @@ function onEvent(e) {
       e.tier
     ],
     finalLap: "FINAL LAP",
-    lap: "LAP 2",
+    lap: `LAP ${race.player.lap}`,
     finish: "FINISH!",
     glider: "TAKE FLIGHT!",
     antigrav: "ANTI-GRAVITY",
@@ -590,7 +623,7 @@ function onEvent(e) {
   if (labels[e.type]) {
     $('notice').dataset.kind=e.type;
     $('notice').innerHTML=e.type==='finish'?raceLettering('FINISH!'):['lap','finalLap'].includes(e.type)?'<div class="lap-sign"></div>':labels[e.type];
-    if(['lap','finalLap'].includes(e.type))$('notice').firstElementChild.innerHTML=lapBoard(e.type==='finalLap'?3:2);
+    if(['lap','finalLap'].includes(e.type))$('notice').firstElementChild.innerHTML=lapBoard(race.player.lap,race.laps);
     $('notice').getAnimations().forEach(a=>a.cancel());
     $('notice').animate(e.type==='finish'?[{opacity:0,scale:'1.45'},{opacity:1,scale:'1',offset:.22},{opacity:1,scale:'1'}]:[{opacity:0,translate:'70px 0'},{opacity:1,translate:'0 0',offset:.2},{opacity:1,translate:'0 0',offset:.8},{opacity:0,translate:'20px -25px'}],{duration:1500});
     $("notice").dataset.essential = String(
@@ -605,6 +638,11 @@ function onEvent(e) {
   if (e.type === "coin") burst(race.player, 10, "#ffdf46");
 }
 let starting = false, driverConfirmed = false;
+function splitConnectionLabel() {
+  return Array.from({length: activeCount()}, (_, slot) =>
+    `P${slot + 1} ${keyboardP2Active(slot) ? 'KEYBOARD TEST' :
+      presenceSlots[slot]?.occupied ? 'CONNECTED' : 'WAITING'}`).join(' · ');
+}
 function showDuoLobby() {
   $('intro').hidden = false;
   $('track-label').hidden = true;
@@ -615,29 +653,29 @@ function showDuoLobby() {
   syncDuoLobby();
 }
 function syncDuoLobby() {
-  if (mode !== 'duo' || !race) return;
-  $('connection').textContent = `P1 ${presenceSlots[0]?.occupied ? 'CONNECTED' : 'WAITING'} · P2 ${keyboardPlayer2 ? 'KEYBOARD TEST' : presenceSlots[1]?.occupied ? 'CONNECTED' : 'WAITING'}`;
+  if (!splitMode() || !race) return;
+  $('connection').textContent = splitConnectionLabel();
   const now = performance.now();
-  const live = [0, 1].map(slot => duoMotionReady(slot, now));
+  const live = Array.from({length: activeCount()}, (_, slot) => duoMotionReady(slot, now));
   const slots = duoSlots();
   if (race.state === 'ready') lobby.sync(slots, live);
-  for (let slot = 0; slot < 2; slot++) {
+  for (let slot = 0; slot < activeCount(); slot++) {
     const c = CHARACTERS.find(character => character.id === lobby.characters[slot]);
     $(`duo-portrait-${slot}`).src = portrait(c);
     $(`duo-portrait-${slot}`).alt = c.name;
     $(`duo-driver-${slot}`).textContent = c.name;
-    $(`duo-state-${slot}`).textContent = slot === 1 && keyboardPlayer2
-      ? (lobby.ready[slot] ? 'READY · KEYBOARD TEST' : 'Press Enter to ready') : !slots[slot]?.occupied ? 'Connect phone' :
+    $(`duo-state-${slot}`).textContent = keyboardP2Active(slot)
+      ? (lobby.ready[slot] ? 'READY · KEYBOARD TEST' : mode === 'duo' ? 'Press Enter to ready' : 'Keyboard · ready on computer') : !slots[slot]?.occupied ? 'Connect phone' :
       !live[slot] ? 'Hold level to calibrate' : lobby.ready[slot] ? 'READY' : 'Press 2 to ready';
   }
   if (race.state === 'ready' && lobby.canStart(slots, live)) beginDuo();
 }
 async function beginDuo() {
-  if (starting || mode !== 'duo' || race.state !== 'ready') return;
+  if (starting || !splitMode() || race.state !== 'ready') return;
   starting = true;
   await audio.ui('start');
   starting = false;
-  const live = [0, 1].map(slot => duoMotionReady(slot, performance.now()));
+  const live = Array.from({length: activeCount()}, (_, slot) => duoMotionReady(slot, performance.now()));
   if (!lobby.canStart(duoSlots(), live)) return;
   constructRace();
   race.start();
@@ -654,29 +692,91 @@ async function beginDuo() {
 }
 function setMode(next) {
   if (race.state !== 'ready' || starting) return;
-  mode = next === 'duo' ? 'duo' : 'solo';
-  document.body.classList.toggle('duo', mode === 'duo');
+  mode = next === 'duo' || next === 'quad' ? next : 'solo';
+  document.body.classList.toggle('duo', splitMode());
+  document.body.classList.toggle('quad', mode === 'quad');
   document.querySelectorAll('[data-mode]').forEach(button =>
     button.setAttribute('aria-pressed', String(button.dataset.mode === mode)));
-  $('duo-lobby').hidden = mode !== 'duo';
-  $('track-label').hidden = mode === 'duo';
-  $('characters').hidden = mode === 'duo';
-  $('chosen').hidden = mode === 'duo';
-  $('start').hidden = mode === 'duo';
-  $('menu-hint').hidden = mode === 'duo';
-  if (mode === 'duo') {
-    lobby.reset();
+  $('duo-lobby').hidden = !splitMode();
+  $('keyboard-test').closest('label').hidden = mode !== 'duo';
+  $('keyboard-test-help').hidden = mode !== 'duo' || !keyboardPlayer2;
+  syncQuadKeyboardUI();
+  $('duo-instructions').textContent = mode === 'quad'
+    ? quadKeyboardTest
+      ? 'Connect your phone as P1 and calibrate normally. Ready Players 2–4 on the computer, then press 2 on your phone to start.'
+      : 'Connect four phones. Hold each sideways and level to calibrate, choose distinct drivers with the crosspads, then press 2 on every phone.'
+    : keyboardPlayer2
+      ? 'Connect one phone as P1. Hold it sideways and level, choose your driver with its crosspad, then press 2. Use the computer arrows to choose P2’s driver and Enter to ready.'
+      : 'Connect two phones. Hold each one sideways and level to calibrate, choose a driver with the crosspad, then press 2 on each phone.';
+  $('track-label').hidden = splitMode();
+  $('characters').hidden = splitMode();
+  $('chosen').hidden = splitMode();
+  $('start').hidden = splitMode();
+  $('menu-hint').hidden = splitMode();
+  if (splitMode()) {
+    lobby = new DuoLobby(activeCount());
     for (const w of wheels) w.reset();
     captureUntils.fill(performance.now() + 10000);
   }
+  document.querySelectorAll('.duo-choice, .duo-player').forEach((element, slot) => {
+    element.hidden = slot % 4 >= activeCount();
+  });
   constructRace();
   applyGraphics();
   syncDuoLobby();
-  if (mode === 'solo') link.feedback({ type: 'controller-profile', profile: 'default', slot: 1 });
   sendProfile();
 }
 for (const button of document.querySelectorAll('[data-mode]'))
   button.onclick = () => setMode(button.dataset.mode);
+function syncQuadKeyboardUI() {
+  $('quad-keyboard-test').closest('label').hidden = mode !== 'quad';
+  $('quad-keyboard-help').hidden = mode !== 'quad' || !quadKeyboardTest;
+  const controls = $('quad-test-controls');
+  controls.hidden = mode !== 'quad' || !quadKeyboardTest;
+  const host = race?.state === 'ready' ? $('duo-lobby') : document.body;
+  if (controls.parentElement !== host) {
+    if (host === document.body) host.append(controls);
+    else host.insertBefore(controls, host.querySelector('.duo-choices'));
+  }
+}
+$('quad-keyboard-test').addEventListener('change', event => {
+  if (race.state !== 'ready' || starting || mode !== 'quad') {
+    event.target.checked = quadKeyboardTest;
+    return;
+  }
+  quadKeyboardTest = event.target.checked;
+  keys.clear();
+  for (let slot = 1; slot < 4; slot++) {
+    lobby.cancel(slot);
+    wheels[slot].reset();
+    captureUntils[slot] = performance.now() + 10000;
+    duoItemPulses[slot] = lastDuoItems[slot] = false;
+  }
+  syncQuadKeyboardUI();
+  $('duo-instructions').textContent = quadKeyboardTest
+    ? 'Connect your phone as P1 and calibrate normally. Ready Players 2–4 on the computer, then press 2 on your phone to start.'
+    : 'Connect four phones. Hold each sideways and level to calibrate, choose distinct drivers with the crosspads, then press 2 on every phone.';
+  canvas.focus({preventScroll:true});
+  syncDuoLobby();
+  sendProfile();
+});
+for (const button of document.querySelectorAll('[data-keyboard-slot]')) {
+  button.addEventListener('click', () => {
+    keyboardSlot = Number(button.dataset.keyboardSlot);
+    keys.clear();
+    duoItemPulses.fill(false);
+    lastDuoItems.fill(false);
+    document.querySelectorAll('[data-keyboard-slot]').forEach(el =>
+      el.setAttribute('aria-pressed', String(Number(el.dataset.keyboardSlot) === keyboardSlot)));
+    canvas.focus({preventScroll:true});
+  });
+}
+$('quad-ready-all').addEventListener('click', () => {
+  if (mode !== 'quad' || !quadKeyboardTest || race.state !== 'ready' || starting) return;
+  for (let slot = 1; slot < 4; slot++) lobby.setReady(slot, duoSlots()[slot].identity, true);
+  canvas.focus({preventScroll:true});
+  syncDuoLobby();
+});
 $('keyboard-test').addEventListener('change', event => {
   if (race.state !== 'ready' || starting) { event.target.checked = keyboardPlayer2; return; }
   keyboardPlayer2 = event.target.checked;
@@ -716,13 +816,14 @@ function chooseDriver(index) {
 }
 function selectLaps(laps) {
   if (race.state !== 'ready' || starting) return;
-  selectedLaps = laps === 1 ? 1 : 3;
+  selectedLaps = normalizeLaps(laps);
   race.laps = selectedLaps;
   localStorage.setItem('openwii.kart.laps', String(selectedLaps));
   syncLapOptions();
   audio.ui('cursor');
 }
 function syncLapOptions() {
+  $('lap-count').value = String(selectedLaps);
   document.querySelectorAll('[data-laps]').forEach(button => {
     button.setAttribute('aria-pressed', String(Number(button.dataset.laps) === selectedLaps));
   });
@@ -731,10 +832,13 @@ function syncLapOptions() {
 for (const button of document.querySelectorAll('[data-laps]')) {
   button.onclick = () => selectLaps(Number(button.dataset.laps));
 }
+$('lap-count').addEventListener('change', event => selectLaps(event.target.value));
+$('lap-decrease').onclick = () => selectLaps(selectedLaps - 1);
+$('lap-increase').onclick = () => selectLaps(selectedLaps + 1);
 syncLapOptions();
 function navigateDriver(direction) {
   if (driverConfirmed) {
-    if (direction === 'left' || direction === 'right') selectLaps(selectedLaps === 1 ? 3 : 1);
+    if (direction === 'left' || direction === 'right') selectLaps(selectedLaps + (direction === 'right' ? 1 : -1));
     return;
   }
   const index=CHARACTERS.findIndex(c=>c.id===selected);
@@ -765,7 +869,7 @@ function confirm() {
     resume();
     return;
   }
-  if (mode === 'duo') {
+  if (splitMode()) {
     if (race.state === 'results' && resultsPresentation?.done) {
       lobby.ready.fill(false);
       constructRace();
@@ -809,19 +913,19 @@ function pause(reason = "Take a breath. The race will wait.") {
   keys.clear();
   duoItemPulses.fill(false);
   lastDuoItems.fill(false);
-  for (const w of (mode === 'duo' ? wheels : [wheel])) w.release();
-  if (mode === 'duo') captureUntils.fill(performance.now() + 10000);
+  for (const w of (splitMode() ? wheels.slice(0, activeCount()) : [wheel])) w.release();
+  if (splitMode()) captureUntils.fill(performance.now() + 10000);
   $("pause-reason").textContent = reason;
   $("pause").hidden = false;
   audio.engine.ctx?.suspend();
 }
 function resume() {
-  if (mode === 'duo' && !['ready', 'results'].includes(race.state)) {
-    const live = [0, 1].every(slot => duoMotionReady(slot, performance.now()));
+  if (splitMode() && !['ready', 'results'].includes(race.state)) {
+    const live = Array.from({length: activeCount()}, (_, slot) => duoMotionReady(slot, performance.now())).every(Boolean);
     if (!lobby.sameParticipants(duoSlots()) || !live) {
-      $('pause-reason').textContent = keyboardPlayer2
+      $('pause-reason').textContent = keyboardP2Active(1)
         ? 'Reconnect Player 1’s phone and hold it level until the wheel is ready.'
-        : 'Reconnect both original phones and hold them level until both wheels are ready.';
+        : `Reconnect all ${activeCount()} original phones and hold them level until every wheel is ready.`;
       return;
     }
   }
@@ -840,7 +944,8 @@ document.addEventListener('click', e => {
 });
 window.addEventListener("keydown", (e) => {
   if (e.target.closest?.('#graphics-panel')) return;
-  if (e.target.id === 'keyboard-test' && ['Space', 'Enter'].includes(e.code)) return;
+  if (e.target.id === 'lap-count') return;
+  if (['keyboard-test', 'quad-keyboard-test'].includes(e.target.id) && ['Space', 'Enter'].includes(e.code)) return;
   const handled = [
     "ArrowLeft",
     "ArrowRight",
@@ -859,13 +964,14 @@ window.addEventListener("keydown", (e) => {
   if (handled.includes(e.code)) e.preventDefault();
   if (e.repeat) return;
   keys.add(e.code);
-  if (mode === 'duo' && keyboardPlayer2 && race.state === 'ready') {
+  const localSlot = mode === 'quad' ? keyboardSlot : 1;
+  if (keyboardP2Active(localSlot) && race.state === 'ready') {
     if (e.code.startsWith('Arrow')) {
-      if (lobby.choose(1, e.code.slice(5).toLowerCase())) audio.ui('cursor');
+      if (lobby.choose(localSlot, e.code.slice(5).toLowerCase())) audio.ui('cursor');
       sendProfile();
     }
-    if (e.code === 'Enter') lobby.setReady(1, duoSlots()[1].identity, true);
-    if (e.code === 'KeyX') lobby.cancel(1);
+    if (e.code === 'Enter') lobby.setReady(localSlot, duoSlots()[localSlot].identity, true);
+    if (e.code === 'KeyX') lobby.cancel(localSlot);
     syncDuoLobby();
     return;
   }
@@ -876,12 +982,12 @@ window.addEventListener("keydown", (e) => {
   if (e.code === 'Escape' && race.state === 'ready') { if (mode === 'solo') cancelDriver(); return; }
   if (e.code === "Enter") confirm();
   if (e.code === "Space") {
-    if (mode === 'duo' && keyboardPlayer2 && !paused && race.state === 'racing') duoItemPulses[1] = true;
+    if (keyboardP2Active(localSlot) && !paused && race.state === 'racing') duoItemPulses[localSlot] = true;
     else itemPulse = true;
   }
   if (e.code === "Escape") paused ? resume() : pause();
   if (e.code === "KeyR") {
-    if (mode === 'duo') return;
+    if (splitMode()) return;
     wheel.reset();
     captureUntil = performance.now() + 10000;
     if (usingPhone && race.state === "racing")
@@ -905,7 +1011,8 @@ document.addEventListener("visibilitychange", () => {
 window.addEventListener("pagehide", () => {
   clearInterval(profileTimer);
   link.feedback({ type: "controller-profile", profile: "default", slot: 0 });
-  if (mode === 'duo') link.feedback({ type: 'controller-profile', profile: 'default', slot: 1 });
+  for (let slot = 1; slot < 4; slot++)
+    link.feedback({ type: 'controller-profile', profile: 'default', slot });
   audio.stop();
 });
 // Pickups: shared geometries, predictable pools, no allocation as racers lap.
@@ -1135,7 +1242,7 @@ function makeCameraRig(viewCamera) {
     cameraUp: new V(0, 1, 0), initializedCamera: false,
     lastFlightCamera: null, landingCamera: null, updateBoost: createBoostFeedback() };
 }
-const cameraRigs = [makeCameraRig(camera), makeCameraRig(camera2)];
+const cameraRigs = [camera, camera2, camera3, camera4].map(makeCameraRig);
 const basis = new THREE.Matrix4(),
   basisX = new V(),
   basisY = new V(),
@@ -1294,9 +1401,9 @@ function draw(dt, now) {
   boostFeedback=updateBoostScreen(race.time,p.boost);
   renderer.info.reset();
   renderer.info.autoReset = false;
-  if (mode === 'duo') {
+  if (splitMode()) {
     renderer.setScissorTest(true);
-    for (let view = 0; view < 2; view++) renderView(dt, now, view);
+    for (let view = 0; view < activeCount(); view++) renderView(dt, now, view);
     renderer.setScissorTest(false);
     renderer.setViewport(0, 0, innerWidth, innerHeight);
     renderer.setScissor(0, 0, innerWidth, innerHeight);
@@ -1316,7 +1423,7 @@ function renderView(dt, now, view) {
   const { camera, camTarget, unconstrainedEye, sceneryOffset, cameraAimTarget,
     cameraAim, cameraUp } = rig;
   let { initializedCamera, lastFlightCamera, landingCamera } = rig;
-  const viewBoost = mode === 'duo' ? rig.updateBoost(time, p.boost) : boostFeedback;
+  const viewBoost = splitMode() ? rig.updateBoost(time, p.boost) : boostFeedback;
   const desired = chasePose(p.jump?{...p,surfaceForward:null,surfaceNormal:{x:0,y:1,z:0}}:p);
   // Blend camera offsets after contact so the steep flight camera does not
   // drop instantly to ground chase height. Keep following the moving kart;
@@ -1448,12 +1555,12 @@ function renderView(dt, now, view) {
     mesh.visible = race.boxes[i].respawn === 0 && mesh.getWorldPosition(basisX).distanceTo(camera.position) > 1.2;
   key.target.position.set(p.x, p.y, p.z);
   key.target.updateMatrixWorld();
-  if (mode === 'duo') {
-    const half = innerWidth / 2;
-    camera.aspect = half / innerHeight;
+  if (splitMode()) {
+    const viewport = splitViewport(innerWidth, innerHeight, mode, view);
+    camera.aspect = viewport.width / viewport.height;
     camera.updateProjectionMatrix();
-    renderer.setViewport(view * half, 0, half, innerHeight);
-    renderer.setScissor(view * half, 0, half, innerHeight);
+    renderer.setViewport(viewport.x, viewport.y, viewport.width, viewport.height);
+    renderer.setScissor(viewport.x, viewport.y, viewport.width, viewport.height);
     renderer.render(scene, camera);
   } else {
     composer.render();
@@ -1463,7 +1570,8 @@ function renderView(dt, now, view) {
 }
 function updateHUD() {
   document.body.classList.toggle("racing", race.state !== "ready");
-  if (mode === 'duo') updateDuoHUD();
+  syncQuadKeyboardUI();
+  if (splitMode()) updateDuoHUD();
   const p = race.player,
     position = race.position(p);
   raceNumerals($("coins"), String(p.coins).padStart(2, "0"));
@@ -1527,9 +1635,19 @@ function updateHUD() {
     $("results").hidden = false;
     $("hud").hidden = true;
     $('duo-hud').hidden = true;
-    $("result-summary").textContent = mode === 'duo'
-      ? race.players.map((player, i) => `P${i + 1} ${player.character.name} · ${ordinal(race.position(player))} place · ${formatTime(player.finishTime)}`).join('    |    ')
-      : `${p.character.name} · ${ordinal(position)} place · ${formatTime(p.finishTime)}`;
+    const summaries = race.players.map((player, i) =>
+      `P${i + 1} ${player.character.name} · ${ordinal(race.position(player))} place · ${formatTime(player.finishTime)}`);
+    if (mode === 'quad') {
+      $('result-summary').replaceChildren(...summaries.map(summary => {
+        const line = document.createElement('span');
+        line.textContent = summary;
+        return line;
+      }));
+    } else {
+      $('result-summary').textContent = mode === 'duo'
+        ? summaries.join('    |    ')
+        : `${p.character.name} · ${ordinal(position)} place · ${formatTime(p.finishTime)}`;
+    }
     const standings=race.standings.slice();
     resultsPresentation={started:performance.now(),duration:1.2,done:false,times:standings.map(r=>r.finishTime)};
     $('again').disabled=true;
@@ -1556,8 +1674,13 @@ function updateDuoHUD() {
     raceNumerals($(`duo-lap-${i}`),`${Math.min(race.laps, p.lap)}/${race.laps}`);
     raceNumerals($(`duo-coins-${i}`),String(p.coins).padStart(2,'0'));
     raceNumerals($(`duo-speed-${i}`),String(Math.round(Math.abs(p.speed) * 3.6)));
-    $(`duo-item-${i}`).textContent = p.roulette > 0 ? 'ITEM ROULETTE' :
-      p.item ? p.item.toUpperCase() : 'NO ITEM';
+    const itemFrame = $(`duo-item-${i}`);
+    const recentlyUsed = !p.item && p.itemUse?.age < .16;
+    itemFrame.classList.toggle('empty', !p.item && p.roulette <= 0 && !recentlyUsed);
+    const itemLabel = p.roulette > 0 ? 'Item roulette' : p.item ? p.item.replaceAll('_',' ') : 'No item';
+    itemFrame.setAttribute('role','img');
+    itemFrame.setAttribute('aria-label',`Player ${i + 1}: ${itemLabel}`);
+    splitItemReels[i](race.time, p.roulette, p.item || (recentlyUsed ? p.itemUse.type : null));
     $(`duo-finish-${i}`).hidden = p.finishTime === null;
     if (!$(`duo-finish-${i}`).dataset.artwork) {
       $(`duo-finish-${i}`).innerHTML = raceLettering('FINISH!');
@@ -1566,6 +1689,17 @@ function updateDuoHUD() {
   }
 }
 const mapCtx = $("minimap").getContext("2d");
+const playerMapContexts = Array.from({length:4}, (_, slot) => {
+  const canvas = document.createElement('canvas');
+  canvas.id = `player-minimap-${slot}`;
+  canvas.className = 'player-minimap';
+  canvas.width = 250;
+  canvas.height = 220;
+  canvas.setAttribute('role','img');
+  canvas.setAttribute('aria-label',`Player ${slot + 1} race minimap`);
+  $(`duo-hud-${slot}`).append(canvas);
+  return canvas.getContext('2d');
+});
 const mapPortraits = new Map(
   CHARACTERS.map((c) => {
     const im = new Image();
@@ -1603,17 +1737,32 @@ function drawMap() {
   c.fillRect(q[0] - 3, q[1] - 4, 6, 8);
   for (const r of [...race.racers].reverse()) {
     const q = to(r.x, r.z);
+    const human = splitMode() && r.id < race.humanCount;
+    const radius = splitMode() ? human ? 10 : 3 : r.id ? 4 : 6;
     c.beginPath();
-    c.arc(...q, r.id ? 4 : 6, 0, Math.PI * 2);
-    c.fillStyle = r.character.color;
+    c.arc(...q, radius, 0, Math.PI * 2);
+    c.fillStyle = human ? playerColors[r.id] : r.character.color;
     c.fill();
-    c.strokeStyle = r.id ? "#eef5ff" : "#fff8a1";
-    c.lineWidth = r.id ? 1.3 : 3;
+    c.strokeStyle = human ? playerColors[r.id] : r.id ? "#eef5ff" : "#fff8a1";
+    c.lineWidth = human ? 3 : r.id ? 1.3 : 3;
     c.stroke();
     const icon = mapPortraits.get(r.character.id);
-    if (icon?.complete) {
-      const size = r.id ? 15 : 21;
+    if (icon?.complete && icon.naturalWidth && (!splitMode() || human)) {
+      const size = splitMode() ? 14 : r.id ? 15 : 21;
       c.drawImage(icon, q[0] - size / 2, q[1] - size / 2, size, size);
+    }
+  }
+  if (splitMode()) {
+    // Draw the track/pack once; share that small canvas across the active HUDs.
+    for (const [slot, player] of race.players.entries()) {
+      const context = playerMapContexts[slot];
+      context.clearRect(0,0,w,h);
+      context.drawImage(c.canvas,0,0);
+      context.beginPath();
+      context.arc(...to(player.x,player.z),13,0,Math.PI*2);
+      context.strokeStyle = '#fff';
+      context.lineWidth = 2;
+      context.stroke();
     }
   }
 }
@@ -1621,14 +1770,14 @@ function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.max(0, Math.min((now - lastFrame) / 1000, 0.1));
   lastFrame = now;
-  if (mode === 'duo' && race?.state === 'ready') syncDuoLobby();
+  if (splitMode() && race?.state === 'ready') syncDuoLobby();
   if (!debug.freeze && !paused) {
-    if (mode === 'duo') {
-      const remotes = [0, 1].map(slot => duoRemote(slot, now));
+    if (splitMode()) {
+      const remotes = Array.from({length: activeCount()}, (_, slot) => duoRemote(slot, now));
       const safe = lobby.sameParticipants(duoSlots()) &&
         remotes.every((remote, i) => remote.live && duoMotionReady(i, now));
       if (!safe && !['ready', 'results'].includes(race.state) && now > duoSignalGraceUntil) {
-        pause('A wheel signal was lost. Reconnect and level both original phones.');
+        pause('A wheel signal was lost. Reconnect and level every original phone.');
       } else if (safe) {
         const inputs = remotes.map((remote, i) => {
           const item = duoItemPulses[i] || (remote.item && !lastDuoItems[i]);
@@ -1640,7 +1789,8 @@ function frame(now) {
         race.update(dt, inputs);
       }
       audio.update(race);
-      $('wheel-status').textContent = remotes.map((remote, i) => `P${i + 1}: ${remote.status}`).join(' · ');
+      $('wheel-status').textContent = remotes.map((remote, i) =>
+        `P${i + 1}: ${splitRemoteStatus(i, remote)}`).join(' · ');
     } else {
     const remote = wheel.read(now),
       keyboard =
