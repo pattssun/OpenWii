@@ -1,4 +1,5 @@
 import {itemRoulette} from "./item-roulette.js";
+import { QUALITY, renderScale, gpuInfo, loadQuality, performanceMeter } from './graphics.js';
 import {raceEffects} from "./race-effects.js";
 import {itemPortraits} from "./item-portraits.js";
 import {raceLettering,lapBoard} from "./hud-lettering.js";
@@ -75,10 +76,14 @@ window.addEventListener("error", (e) => {
 });
 const renderer = new THREE.WebGLRenderer({
   canvas,
-  antialias: true,
+  // Antialias once in the composer, rather than also on the output canvas.
+  antialias: false,
   powerPreference: "high-performance",
 });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 1.6));
+let qualityName = loadQuality();
+let quality = QUALITY[qualityName];
+const gpu = gpuInfo(renderer.getContext());
+renderer.setPixelRatio(renderScale(innerWidth, innerHeight, devicePixelRatio, quality));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -132,7 +137,7 @@ const trackLights = [-2, -1, 0, 1, 2].map((side) => {
 });
 const renderTarget = new THREE.WebGLRenderTarget(innerWidth, innerHeight, {
   type: THREE.HalfFloatType,
-  samples: 4,
+  samples: Math.min(quality.samples, renderer.capabilities.maxSamples),
 });
 const composer = new EffectComposer(renderer, renderTarget);
 composer.addPass(new RenderPass(scene, camera));
@@ -189,6 +194,46 @@ if (world.source) {
 // The source stadium has 16:9 panels; generated scenery uses 4:3 panels.
 const broadcast = stadiumBroadcast(renderer, scene, world.screenMaterials,
   world.source ? {width:768,height:432} : undefined);
+function applyGraphics() {
+  quality = QUALITY[qualityName];
+  const scale = renderScale(innerWidth, innerHeight, devicePixelRatio, quality);
+  renderer.setPixelRatio(scale);
+  renderer.setSize(innerWidth, innerHeight);
+  for (const target of [composer.renderTarget1, composer.renderTarget2]) {
+    const samples = Math.min(quality.samples, renderer.capabilities.maxSamples);
+    if (target.samples !== samples) { target.samples = samples; target.dispose(); }
+  }
+  composer.setPixelRatio(scale);
+  composer.setSize(innerWidth, innerHeight);
+  ambientOcclusion.enabled = quality.ao;
+  bloom.enabled = quality.bloom;
+  renderer.shadowMap.enabled = quality.shadows;
+  if (key.shadow.mapSize.x !== quality.shadowSize) {
+    key.shadow.mapSize.set(quality.shadowSize, quality.shadowSize);
+    key.shadow.map?.dispose();
+    key.shadow.map = null;
+  }
+  renderer.shadowMap.needsUpdate = true;
+  broadcast.setRate(quality.broadcastHz);
+  $('graphics-quality').value = qualityName;
+}
+applyGraphics();
+$('graphics-quality').addEventListener('change', event => {
+  qualityName = event.target.value;
+  try { localStorage.setItem('openwii.kart.graphics.v1', qualityName); } catch { /* Optional. */ }
+  applyGraphics();
+});
+$('graphics-gpu').textContent = gpu.renderer;
+$('graphics-advice').textContent = gpu.software
+  ? 'Software rendering detected. Enable graphics acceleration in your browser settings and restart the browser.'
+  : gpu.nvidia
+    ? 'NVIDIA hardware rendering active.'
+    : 'For the RTX GPU: Windows Settings > System > Display > Graphics > your browser > Options > High performance, then restart the browser.';
+const updatePerformance = performanceMeter(({fps, frameMs}) => {
+  $('graphics-fps').textContent = `${fps} FPS`;
+  const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+  $('graphics-stats').textContent = `${frameMs.toFixed(1)} ms/frame · ${size.x} × ${size.y} · ${renderer.info.render.calls} draw calls · ${Math.round(renderer.info.render.triangles / 1000)}k triangles`;
+});
 addAtmosphere(scene);
 // Consolidate static scenery by material. No dynamic light/firework meshes are
 // included; source object transforms are baked, preserving exact geometry.
@@ -593,6 +638,7 @@ document.addEventListener('click', e => {
   }else audio.ui('confirm');
 });
 window.addEventListener("keydown", (e) => {
+  if (e.target.closest?.('#graphics-panel')) return;
   const handled = [
     "ArrowLeft",
     "ArrowRight",
@@ -1157,8 +1203,9 @@ function draw(dt, now) {
   key.target.updateMatrixWorld();
   renderer.info.reset();
   renderer.info.autoReset = false;
-  broadcast.update(now, camera);
   composer.render();
+  broadcast.update(now, camera);
+  if (!document.hidden) updatePerformance(now);
   renderCount++;
   if (previousDrawTime && !document.hidden) {
     frameTimes.push(now - previousDrawTime);
@@ -1430,6 +1477,9 @@ const debug = {
       triangles: renderer.info.render.triangles,
     };
   },
+  get graphics() {
+    return { quality: qualityName, gpu, pixelRatio: renderer.getPixelRatio(), ao: ambientOcclusion.enabled, bloom: bloom.enabled, shadows: renderer.shadowMap.enabled, samples: composer.renderTarget1.samples };
+  },
 };
 if (new URLSearchParams(location.search).get("evidence") === "1") {
   window.__kart = debug;
@@ -1528,8 +1578,7 @@ syncPickupPools();
 audio.prepare();
 requestAnimationFrame(frame);
 window.addEventListener("resize", () => {
-  renderer.setSize(innerWidth, innerHeight);
-  composer.setSize(innerWidth, innerHeight);
+  applyGraphics();
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
 });
@@ -1540,6 +1589,7 @@ function toggleFullscreen() {
 }
 $("fullscreen").addEventListener("click", toggleFullscreen);
 window.addEventListener("keydown", (e) => {
+  if (e.target.closest?.('#graphics-panel')) return;
   if (e.repeat) return;
   if (e.code === "KeyF") toggleFullscreen();
   if (e.code === "KeyC") document.body.classList.toggle("capture");

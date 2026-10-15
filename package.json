@@ -20,7 +20,7 @@
     "build:kart-assets": "node games/mario-kart/pipeline/build.mjs",
     "test:kart-browser": "node games/mario-kart/browser-evidence.mjs",
     "test:kart-public": "node games/mario-kart/public-review.mjs",
-    "test:unit": "node --test \"core/**/*.test.mjs\" \"games/**/*.test.mjs\" \"tests/kart-prototype/*.test.mjs\"",
+    "test:unit": "node --test \"core/**/*.test.mjs\" \"games/**/*.test.mjs\" \"scripts/*.test.mjs\" \"tests/kart-prototype/*.test.mjs\"",
     "test:kart-fallback": "node games/mario-kart/public-review.mjs --fallback"
   },
   "dependencies": {

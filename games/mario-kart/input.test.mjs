@@ -37,9 +37,29 @@ test("both landscape grips honor the device-pinned east-end-down sign", () => {
     const w = settled(flip);
     assert.ok(w.ref);
     w.sample(sample(12, flip), 816);
-    assert.ok(w.read(820).steer > 0.4);
+    assert.ok(w.read(820).steer > 0.3);
     w.sample(sample(-12, flip), 832);
-    assert.ok(w.read(840).steer < -0.4);
+    assert.ok(w.read(840).steer < -0.3);
+  }
+});
+test("small phone tilts give gentle corrections while larger tilts retain full steering", () => {
+  for (const flip of [false, true]) {
+    const w = settled(flip);
+    let now = 816;
+    for (const direction of [-1, 1]) {
+      const values = [];
+      for (const degrees of [2, 5, 12, 18, 30]) {
+        w.sample(sample(degrees * direction, flip), now);
+        values.push(w.read(now + 1).steer * direction);
+        now += 16;
+      }
+      assert.equal(Math.abs(values[0]), 0, 'hand tremor stays inside the deadzone');
+      assert.ok(values[1] > .08 && values[1] < .12, '5 degrees is a small correction');
+      assert.ok(values[2] > .3 && values[2] < .4, '12 degrees is below half steering');
+      assert.ok(values[3] > .55 && values[3] < .65, 'the former full-lock angle is now moderate');
+      assert.equal(values[4], 1, '30 degrees still reaches full steering');
+      assert.ok(values.every((v,i) => i === 0 || v > values[i-1]));
+    }
   }
 });
 test("one tilted/moving countdown sample never becomes a permanent wrong neutral", () => {

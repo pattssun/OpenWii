@@ -58,6 +58,20 @@
       ><button id="fullscreen" aria-label="Toggle fullscreen">
         ⛶ FULLSCREEN</button
       ><button id="mute" aria-label="Toggle audio">♪ SOUND ON</button>
+      <details id="graphics-panel">
+        <summary>GRAPHICS · <span id="graphics-fps">… FPS</span></summary>
+        <div class="graphics-body">
+          <label for="graphics-quality">Graphics quality</label>
+          <select id="graphics-quality">
+            <option value="low">Performance</option>
+            <option value="medium">Balanced</option>
+            <option value="high">High</option>
+          </select>
+          <p id="graphics-stats"></p>
+          <p id="graphics-gpu"></p>
+          <p id="graphics-advice"></p>
+        </div>
+      </details>
     </div>
     <div id="intro">
       <div class="eyebrow">MUSHROOM CUP · 150cc</div>

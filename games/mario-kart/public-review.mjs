@@ -3,6 +3,7 @@
 import {chromium} from 'playwright';
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
+import {fileURLToPath} from 'node:url';
 const base=process.env.KART_URL||'https://localhost:8443';
 const fallback=process.argv.includes('--fallback');
 const out=new URL(fallback?'./evidence/public-fallback/':'./evidence/public-release/',import.meta.url);
@@ -31,7 +32,7 @@ try{
     }
   }
   assert.equal(await page.locator('.character').count(),8);
-  await page.screenshot({path:new URL('menu.png',out).pathname});
+  await page.screenshot({path:fileURLToPath(new URL('menu.png',out))});
   await page.keyboard.press('ArrowRight');assert.equal(await page.locator('#chosen').textContent(),'Luigi');
   await page.keyboard.press('Enter');await page.locator('[data-laps="1"]').click();await page.keyboard.press('Enter');
   await page.waitForFunction(()=>__kart.race.state==='countdown');
@@ -53,6 +54,7 @@ try{
   await page.click('#mute');assert.equal(await page.evaluate(()=>__kart.audioState.enabled),true);
   report.checks.push('launcher order and pairing QR',fallback?'eight procedural racers and generated track':'eight source racers, original course, UI fonts and artwork','driver and lap selection','countdown, acceleration and braking','pause and resume',fallback?'synth audio and mute without sample pack':'complete sample pack decoded, audio and mute');
   await page.evaluate(async()=>window.geometry=await import('./track.js'));
+  const firstRaceFrame=await page.evaluate(()=>__kart.frameTimes.length);
   await page.keyboard.down('KeyZ');let direction=0,seenAnti=false,seenGlider=false;const start=Date.now();
   while(Date.now()-start<180000){
     const state=await page.evaluate(()=>{const r=__kart.race.player;return {state:__kart.race.state,x:r.x,z:r.z,heading:r.heading,anti:r.anti,gliding:r.gliding,target:geometry.surfaceAt(r.s+Math.max(12,r.speed*.48),0)};});
@@ -65,11 +67,15 @@ try{
   }
   await page.keyboard.up('KeyZ');if(direction)await page.keyboard.up(direction>0?'ArrowRight':'ArrowLeft');
   assert.equal(await page.evaluate(()=>__kart.race.state),'results','Complete one lap through normal input');
+  report.performance=await page.evaluate(first=>{
+    const frames=__kart.frameTimes.slice(first).sort((a,b)=>a-b);
+    return {averageFPS:1000/(frames.reduce((a,b)=>a+b,0)/frames.length),p95ms:frames[Math.floor(frames.length*.95)],frames:frames.length,graphics:__kart.graphics};
+  },firstRaceFrame);
   await page.waitForFunction(()=>!document.getElementById('results').hidden&&!document.getElementById('again').disabled,null,{timeout:20000});
   assert.ok(seenAnti&&seenGlider,'Race traverses antigravity and gliding');
   assert.equal(await page.locator('#standings').evaluate(el=>el.children.length),8);
   report.raceSeconds=(Date.now()-start)/1000;report.checks.push('full keyboard race through antigravity and gliding','finish sound transition and eight-row results');
-  await page.screenshot({path:new URL('results.png',out).pathname});
+  await page.screenshot({path:fileURLToPath(new URL('results.png',out))});
   await page.click('#again');await page.waitForFunction(()=>__kart.race.state==='countdown');report.checks.push('race again');
   assert.deepEqual(report.errors,[]);report.passed=true;console.log(JSON.stringify(report,null,2));
 }finally{await writeFile(new URL('report.json',out),JSON.stringify(report,null,2)+'\n');await browser.close();}

@@ -23,7 +23,8 @@ See the main README for [requirements and setup](../../README.md#quick-start),
 ## Controls
 
 Hold the phone sideways with the **crosspad on the left and 1 / 2 on the right**,
-screen mostly facing up. Roll it like a steering wheel to turn. The remote keeps
+screen mostly facing up. Roll it like a steering wheel to turn. Small tilts give
+gentle corrections; a tilt of about 28° reaches full steering. The remote keeps
 its physical button arrangement when the browser changes orientation; on iPad,
 the controls scale up to fit the screen.
 
@@ -57,6 +58,35 @@ automatically. The leaderboard appears after the finish cue, with the race
 continuing behind it. Mario Kart currently supports **one phone driver** against
 seven computer-controlled racers, using the first phone's player slot.
 
+
+## Graphics and performance
+
+Open **GRAPHICS** at the top right to see live FPS, frame time, render resolution,
+and the GPU actually rendering the game. During a race, move the mouse to the top
+bar to reveal it. Graphics changes apply immediately and are remembered.
+
+| Setting | Resolution budget | Effects |
+| --- | --- | --- |
+| Balanced (default) | Up to 1080p | Bloom, 1024px shadows, 2-sample antialiasing, 5 FPS stadium screens |
+| Performance | Up to 720p | No ambient occlusion, bloom, dynamic shadows or live stadium feed |
+| High | Up to 1440p | Ambient occlusion, bloom, 2048px shadows, 4-sample antialiasing, 10 FPS stadium screens |
+
+Resolution preserves the window's aspect ratio and does not exceed the pixel
+budget, including on high-DPI displays. The HUD remains at native resolution.
+
+On laptops with both Intel and NVIDIA graphics, check that the GPU readout names
+the NVIDIA adapter. The game requests high performance, but Windows selects the
+GPU. Set your browser to **High performance** in **Windows Settings > System >
+Display > Graphics**, then fully quit and reopen the browser. See
+[Microsoft's per-app GPU instructions](https://support.microsoft.com/en-au/windows/hardware/display-graphics/optimizations-for-windowed-games-in-windows-11).
+If the readout reports software rendering, enable graphics acceleration in the
+browser's system settings and restart it.
+
+With the server running, `node games/mario-kart/performance-review.mjs --compare`
+prints the actual Chrome renderer and frame timings at three fixed course poses
+for each preset at a 1920×1080 viewport. Add `--headed` for a visible test window.
+This render benchmark freezes the race to compare the same views; it does not
+measure race simulation cost or physical phone input.
 
 ## What comes with the repository
 

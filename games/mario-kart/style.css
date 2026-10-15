@@ -74,6 +74,13 @@ a:focus-visible {
   font-size: 10px;
   letter-spacing: 1px;
 }
+#graphics-panel { position: relative; letter-spacing: normal; }
+#graphics-panel summary { cursor: pointer; white-space: nowrap; padding: 10px 13px; border-radius: 20px; background: #142b52dd; border: 1px solid #93b7d64d; }
+.graphics-body { position: absolute; top: 42px; right: 0; width: min(360px, 85vw); padding: 18px; border-radius: 12px; background: #0a1635f5; border: 1px solid #93b7d64d; font-size: 12px; font-weight: 400; line-height: 1.5; text-shadow: none; box-shadow: 0 8px 25px #0008; }
+.graphics-body label { display: block; font-weight: 700; }
+.graphics-body select { width: 100%; padding: 8px; margin-top: 6px; background: #142b52; color: white; border: 1px solid #93b7d6; border-radius: 5px; }
+.graphics-body p { overflow-wrap: anywhere; margin: 12px 0 0; }
+#graphics-advice { color: #bfe5ff; }
 #intro {
   position: absolute;
   inset: 0 auto 0 0;

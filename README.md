@@ -8,7 +8,7 @@ vary by game.
 
 ## Quick start
 
-Requires **Node.js 22+**, **OpenSSL**, a computer browser with WebGL 2, and a
+Requires **Node.js 22+**, a computer browser with WebGL 2, and a
 motion-capable phone browser on the **same Wi-Fi**.
 
 ```bash
@@ -60,8 +60,7 @@ stream so it never feels laggy.
 
 - **Cannot connect:** check both devices are on the same Wi-Fi, allow Node.js
   through the firewall, and avoid guest networks that isolate devices.
-- **Buttons work but motion does not:** check HTTPS and motion permissions. If
-  the terminal reports an HTTP fallback, install OpenSSL and restart.
+- **Buttons work but motion does not:** check HTTPS and motion permissions.
 - **Black screen:** enable WebGL 2 / hardware acceleration in the computer browser.
 - **No sound:** click the game to unlock audio and check its mute control.
 
