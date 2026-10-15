@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { QUALITY, renderScale, loadQuality, performanceMeter } from './graphics.js';
+import { QUALITY, renderScale, duoRenderScale, loadQuality, performanceMeter } from './graphics.js';
 
 test('render resolution stays within each preset budget at fullscreen and high DPI', () => {
   for (const quality of Object.values(QUALITY)) {
@@ -8,6 +8,17 @@ test('render resolution stays within each preset budget at fullscreen and high D
       const scale = renderScale(width,height,dpr,quality);
       assert.ok(width * height * scale ** 2 <= quality.pixels + 1);
       assert.ok(scale <= dpr && scale <= quality.pixelRatio);
+    }
+  }
+});
+test('two views share the selected budget, with High capped at 1080p', () => {
+  const budgets = { low: 1280 * 720, medium: 1920 * 1080, high: 1920 * 1080 };
+  for (const [name, quality] of Object.entries(QUALITY)) {
+    for (const [width, height, dpr] of [[3840, 2160, 2], [1920, 1080, 1.5], [1280, 720, 1]]) {
+      const scale = duoRenderScale(width, height, dpr, quality);
+      assert.ok(width * height * scale ** 2 <= budgets[name] + 1);
+      assert.ok(scale <= 1 && scale <= dpr);
+      if (width === 1920) assert.ok(Math.abs(scale - Math.sqrt(budgets[name] / (width * height))) < 1e-12);
     }
   }
 });

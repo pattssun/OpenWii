@@ -19,7 +19,7 @@ const socket = io({ transports: ['websocket', 'polling'] });
 
 const $ = (id) => document.getElementById(id);
 const els = {
-  net: $('net'), dotNet: $('dot-net'), hz: $('hz'), player: $('player'),
+  net: $('net'), dotNet: $('dot-net'), hz: $('hz'), player: $('player'), wheelGuide: $('wheel-guide'),
   gate: $('gate'), enable: $('enable'),
   remote: $('remote'), stage: $('stage'),
   btnA: $('btn-a'), btnB: $('btn-b'),
@@ -115,8 +115,17 @@ function syncLeds() {
   }
 }
 
+const PHONE_ID_KEY = 'openwii.phone.identity.v1';
+let phoneIdentity;
+try {
+  phoneIdentity = localStorage.getItem(PHONE_ID_KEY);
+  if (!/^[a-zA-Z0-9_-]{16,128}$/.test(phoneIdentity || '')) {
+    phoneIdentity = crypto.randomUUID();
+    localStorage.setItem(PHONE_ID_KEY, phoneIdentity);
+  }
+} catch { phoneIdentity = crypto.randomUUID(); }
 socket.on('connect', () => {
-  socket.emit('register', 'controller');
+  socket.emit('register', { role: 'controller', identity: phoneIdentity });
   setNet('waiting for PC…', '');
   syncLeds();
 });
@@ -135,14 +144,21 @@ socket.on('presence', ({ game }) => {
 socket.on('ping-probe', ({ id }) => socket.emit('pong-probe', { id }));
 
 let playerSlot = null;
+function showPlayerLabel(label, color) {
+  els.player.textContent = label;
+  els.player.style.color = color;
+  els.wheelGuide.textContent = label;
+  els.wheelGuide.style.color = color;
+}
 socket.on('slot', ({ slot }) => {
   playerSlot = slot;
-  els.player.textContent = `P${slot + 1}`;
+  showPlayerLabel(`P${slot + 1} · ${slot === 0 ? 'RED' : slot === 1 ? 'BLUE' : 'PLAYER'}`,
+    slot === 0 ? '#ff5267' : slot === 1 ? '#5eaaff' : '#7fb7ff');
   els.player.classList.remove('hide');
   syncLeds();
 });
 socket.on('slot-denied', ({ max }) => {
-  setNet(`all ${max} player slots are full`, 'err');
+  setNet(`all ${max} player slots are reserved`, 'err');
 });
 
 // Game feedback lands in the hand: haptics + the speaker grille lighting up.
@@ -494,6 +510,9 @@ function setWheelMode(on) {
   }
 }
 socket.on('feedback', msg => {
+  if (msg.type === 'controller-player') {
+    showPlayerLabel(msg.playerLabel || `P${playerSlot + 1}`, msg.playerColor || '#7fb7ff');
+  }
   if (msg.type === 'controller-profile' && msg.profile === 'wheel') {
     wheelModeUntil = performance.now() + 2500; setWheelMode(true);
   }

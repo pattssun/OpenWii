@@ -104,6 +104,10 @@ export class SampledKartAudio {
     this.play(keys[(this.voiceIndex=(this.voiceIndex||0)+1)%keys.length],{bus:'voice'});
   }
   event(e,race){
+    if(e.type==='finish'&&race.humanCount===2){
+      if(race.state!=='finishing')return true;
+      e={...e,racer:0};
+    }
     if(!this.ready)return false;
     if(this.race!==race)this.reset(race);
     const r=race.racers[e.racer];if(!r)return true;

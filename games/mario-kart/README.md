@@ -1,7 +1,7 @@
 # Mario Kart for OpenWii
 
 A fan-made browser racing game with your phone as the steering wheel. Choose
-one of eight drivers and race seven CPU opponents for one or three laps, with
+one of eight drivers and race one or two human players plus CPU opponents for one or three laps, with
 items, drifting, mini-turbos, anti-gravity and gliding.
 
 From the repository root:
@@ -54,10 +54,37 @@ pauses the race; reconnect and press **2 / Enter** to resume.
 
 Drifting builds blue, orange, then purple sparks; release it for a mini-turbo.
 Item boxes award power-ups, coins raise top speed, and ramps deploy the glider
-automatically. The leaderboard appears after the finish cue, with the race
-continuing behind it. Mario Kart currently supports **one phone driver** against
-seven computer-controlled racers, using the first phone's player slot.
+automatically. The leaderboard appears after all eight racers finish.
 
+## Two players
+
+Choose **2 PLAYERS** in the game lobby. Connect two phones to the same server;
+the first is red P1 on the left and the second is blue P2 on the right. Each
+phone chooses its own driver with the crosspad. Hold both phones sideways and
+level until each shows wheel ready, then press **2** on each phone. Drivers must
+be distinct. The computer's race length buttons apply to both players.
+
+Each player has a separate camera, item, position, lap, coins, and speed display.
+Two humans race with six CPU racers. If a phone disconnects or stops streaming
+motion, the race pauses. Reconnect the same phone, hold it level until its wheel
+is ready, then press **2** to resume. Phone identity and player slot persist for
+the current server run; restart the server to clear reservations. **Race Again**
+returns both players to the lobby to choose drivers and ready up again.
+
+
+## Testing with one phone
+
+Choose **2 PLAYERS**, then tick **Test with one phone: keyboard Player 2**.
+Connect your phone as red P1 and calibrate normally. Use its crosspad to choose
+your driver and press **2** to ready. On the computer, click the game background,
+use the arrow keys to choose blue P2's driver, and press **Enter** to ready.
+Both players must be ready before the shared countdown starts.
+
+For P2, use **Z** for gas, **X** for brake, **arrows** to steer, **Shift** to drift,
+and **Space** for an item. **Esc** pauses; **Enter** resumes. The option is off
+by default and does not reserve a phone slot. To return to two-phone play,
+untick it in the lobby. It exercises split-screen racing with one real phone;
+it does not test a second phone's sensors or connection.
 
 ## Graphics and performance
 
@@ -73,6 +100,10 @@ bar to reveal it. Graphics changes apply immediately and are remembered.
 
 Resolution preserves the window's aspect ratio and does not exceed the pixel
 budget, including on high-DPI displays. The HUD remains at native resolution.
+Two-player mode uses a combined 720p budget on Performance and up to 1080p on
+Balanced or High, with direct side-by-side views and no postprocessing, dynamic
+shadows, or live stadium screens. The graphics preset is retained for the next
+single-player race.
 
 On laptops with both Intel and NVIDIA graphics, check that the GPU readout names
 the NVIDIA adapter. The game requests high performance, but Windows selects the

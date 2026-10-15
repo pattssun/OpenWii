@@ -130,6 +130,10 @@ export class KartAudio {
     else this.engine.tone({freq:kind==='cursor'?880:660,dur:.055,gain:.06,type:'sine'});
   }
   event(e, race) {
+    if (e.type === 'finish' && race?.humanCount === 2) {
+      if (race.state !== 'finishing') return;
+      e = { ...e, racer: 0 };
+    }
     if (race && this.original.event(e, race)) return;
     if (e.racer !== 0) return;
     if (e.type === 'finish') this.fallbackFinishUntil = (this.engine.ctx?.currentTime || 0) + .6;

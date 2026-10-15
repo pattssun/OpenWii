@@ -9,6 +9,14 @@ export function renderScale(width, height, dpr, quality) {
   return Math.min(dpr, quality.pixelRatio, Math.sqrt(quality.pixels / Math.max(1, width * height)));
 }
 
+/** Split views share one canvas budget. High retains its preset while the
+ * direct two-view path caps total pixels and device pixel ratio at 1080p/1. */
+export function duoRenderScale(width, height, dpr, quality) {
+  return renderScale(width, height, dpr, {
+    pixels: Math.min(quality.pixels, 1920 * 1080), pixelRatio: 1,
+  });
+}
+
 export function gpuInfo(gl) {
   const extension = gl.getExtension('WEBGL_debug_renderer_info');
   const renderer = String(gl.getParameter(extension ? extension.UNMASKED_RENDERER_WEBGL : gl.RENDERER));

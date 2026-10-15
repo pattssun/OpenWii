@@ -20,6 +20,15 @@ const glyphs={
 };
 const colors={gold:['#fff577','#f9d334','#eca02c'],silver:['#ffffff','#e4f2f6','#a9c4d2'],bronze:['#fff1d2','#efc890','#bb895e'],orange:['#ffe073','#f4ba39','#dc8221']};
 let serial=0;
+/** Use the same rank artwork and medal palette in every race viewport. */
+export function racePosition(element, position) {
+ if(element.dataset.rank===String(position))return false;
+ element.dataset.rank=String(position);
+ const suffix=position===1?'st':position===2?'nd':position===3?'rd':'th';
+ element.setAttribute('aria-label',`${position}${suffix}`);
+ element.innerHTML=raceLettering(String(position),position===1?'gold':position===2?'silver':position===3?'bronze':'orange')+`<sup>${suffix}</sup>`;
+ return true;
+}
 export function raceLettering(text,palette='gold'){
  const id='race-ink-'+serial++,c=colors[palette]||colors.gold;let x=12,paths='';
  let index=0;
