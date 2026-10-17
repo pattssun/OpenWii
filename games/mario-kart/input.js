@@ -6,6 +6,9 @@ import {
   STEER_FULL,
 } from "../alien-attack/logic.js";
 import { clamp } from "./track.js";
+// Reduce phone steering by 40% before clamping. Small corrections are gentler,
+// while a deliberate ~28-degree tilt still reaches full steering lock.
+const STEERING_SENSITIVITY = 0.6;
 /** Thin safety envelope around Alien Attack's proven, device-pinned mapping. */
 export class WheelInput {
   constructor({ invert = false } = {}) {
@@ -78,7 +81,7 @@ export class WheelInput {
       const shaped = canCapture
         ? this.filter.update(raw, dt)
         : this.filter.update(raw, 0);
-      this.value = clamp(shaped / STEER_FULL, -1, 1) * (this.invert ? -1 : 1);
+      this.value = clamp((shaped / STEER_FULL) * STEERING_SENSITIVITY, -1, 1) * (this.invert ? -1 : 1);
       this.armed = true;
       this.status = "Wheel ready";
     }

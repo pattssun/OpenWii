@@ -1,4 +1,5 @@
 import {sourceJumpLaunch} from "./source-jump.js";
+import { normalizeLaps } from './race-settings.js';
 import { stepSourceGlide } from './glide.js';
 import { contactResponse } from "./contact-response.js";
 import { roadFrame } from "./visual-frame.js";
@@ -139,8 +140,8 @@ function makeRacer(character, i) {
   };
 }
 export class Race {
-  constructor({ seed = 381, character = "mario", laps = 3, onEvent = () => {} } = {}) {
-    this.laps = laps === 1 ? 1 : 3;
+  constructor({ seed = 381, character = "mario", characters, humanCount, laps = 3, onEvent = () => {} } = {}) {
+    this.laps = normalizeLaps(laps);
     this.finishedAt = null;
     this.seed = seed;
     this.rng = seeded(seed);
@@ -149,9 +150,21 @@ export class Race {
     this.time = 0;
     this.raceTime = 0;
     this.accumulator = 0;
-    const chosen = CHARACTERS.find((c) => c.id === character) || CHARACTERS[0];
-    const order = [chosen, ...CHARACTERS.filter((c) => c.id !== chosen.id)];
+    const requested = Array.isArray(characters) ? characters : [character];
+    this.humanCount = humanCount === 4 || requested.length === 4 ? 4 :
+      humanCount === 2 || requested.length === 2 ? 2 : 1;
+    const selected = [];
+    for (const id of requested.slice(0, this.humanCount)) {
+      const choice = CHARACTERS.find((c) => c.id === id);
+      if (choice && !selected.includes(choice)) selected.push(choice);
+    }
+    for (const choice of CHARACTERS) {
+      if (selected.length >= this.humanCount) break;
+      if (!selected.includes(choice)) selected.push(choice);
+    }
+    const order = [...selected, ...CHARACTERS.filter((c) => !selected.includes(c))];
     this.racers = order.slice(0, 8).map(makeRacer);
+    this.players = this.racers.slice(0, this.humanCount);
     this.player = this.racers[0];
     this.objects = [];
     this.nextId = 1;
@@ -159,7 +172,7 @@ export class Race {
     this.boxes = ITEM_ROWS.map((p, id) => ({ ...p, id, respawn: 0 }));
     this.coins = COIN_SPOTS.map((p, id) => ({ ...p, id, respawn: 0 }));
     this.count = 3;
-    this.pendingItem = false;
+    this.pendingItems = this.players.map(() => false);
   }
   emit(type, racer = this.player, extra = {}) {
     this.onEvent({ type, racer: racer.id, time: this.time, ...extra });
@@ -193,20 +206,25 @@ export class Race {
       return;
     // A long background stall pauses instead of running a race without the driver.
     this.accumulator += Math.min(dt, 0.25);
-    if (input.item) this.pendingItem = true;
+    const inputs = this.humanCount === 1 ? [Array.isArray(input) ? input[0] || {} : input] :
+      this.players.map((_, i) => Array.isArray(input) ? input[i] || {} : i === 0 ? input : {});
+    for (let i = 0; i < this.humanCount; i++)
+      if (inputs[i].item) this.pendingItems[i] = true;
     while (this.accumulator + 1e-10 >= FIXED_DT) {
-      this.step(FIXED_DT, { ...input, item: this.pendingItem });
-      this.pendingItem = false;
+      this.step(FIXED_DT, inputs.map((value, i) => ({ ...value, item: this.pendingItems[i] })));
+      this.pendingItems.fill(false);
       this.accumulator -= FIXED_DT;
     }
   }
-  step(dt, input) {
+  step(dt, inputs) {
     this.time += dt;
     if (this.state === "countdown") {
-      if (input.gas && !this.player.lastInput.gas)
-        this.player.gasDownAt = this.time;
-      if (!input.gas) this.player.gasDownAt = null;
-      this.player.lastInput = { ...input };
+      for (const [i, player] of this.players.entries()) {
+        const input = inputs[i];
+        if (input.gas && !player.lastInput.gas) player.gasDownAt = this.time;
+        if (!input.gas) player.gasDownAt = null;
+        player.lastInput = { ...input };
+      }
       const n = Math.max(0, 3 - Math.floor(this.time));
       if (n !== this.count) {
         this.count = n;
@@ -216,15 +234,16 @@ export class Race {
       this.state = "racing";
       this.count = 0;
       this.emit("go");
-      const held =
-        this.player.gasDownAt === null ? 0 : 3 - this.player.gasDownAt;
-      if (held >= 0.7 && held <= 1.5) {
-        this.player.boost = 1.8;
-        this.player.speed = 24;
-        this.emit("rocket");
-      } else if (held > 1.8) {
-        this.player.spin = 1.05;
-        this.emit("burnout");
+      for (const player of this.players) {
+        const held = player.gasDownAt === null ? 0 : 3 - player.gasDownAt;
+        if (held >= 0.7 && held <= 1.5) {
+          player.boost = 1.8;
+          player.speed = 24;
+          this.emit("rocket", player);
+        } else if (held > 1.8) {
+          player.spin = 1.05;
+          this.emit("burnout", player);
+        }
       }
     }
     this.raceTime += dt;
@@ -232,8 +251,8 @@ export class Race {
       p.respawn = Math.max(0, p.respawn - dt);
     const oldProgress = new Map(this.racers.map((r) => [r.id, r.progress]));
     for (const r of this.racers) {
-      const auto = r.id !== 0 || r.finishTime !== null;
-      this.move(r, auto ? this.cpuInput(r) : input, dt, auto);
+      const auto = r.id >= this.humanCount || r.finishTime !== null;
+      this.move(r, auto ? this.cpuInput(r) : inputs[r.id], dt, auto);
     }
     this.collisions(dt, oldProgress);
     this.updateObjects(dt, oldProgress);
@@ -242,11 +261,16 @@ export class Race {
       .filter((r) => r.finishTime !== null)
       .sort((a, b) => a.finishTime - b.finishTime)
       .map((r) => r.id);
-    if (this.player.finishTime !== null && this.state === "racing") {
-      this.state = "finishing";
-      this.finishedAt = this.time;
-      this.emit("finish");
-    }
+    for (const player of this.players)
+      if (player.finishTime !== null && !player.finishAnnounced) {
+        player.finishAnnounced = true;
+        player.finishedAt = this.time;
+        if (this.players.every((human) => human.finishTime !== null) && this.state === 'racing') {
+          this.state = 'finishing';
+          this.finishedAt = this.time;
+        }
+        this.emit("finish", player);
+      }
     if (
       this.state === "finishing" &&
       this.finishOrder.length === 8
@@ -352,7 +376,7 @@ export class Race {
     const offroad = !r.gliding && !r.jump && (activeSurfaceTrack ? !activeSurfaceTrack.onRoad(r.s,r.lateral,r) : Math.abs(r.lateral)>ROAD_HALF+.2);
     let max = topSpeed(r.coins);
     if (auto) {
-      const gap = this.player.progress - r.progress;
+      const gap = Math.max(...this.players.map((player) => player.progress)) - r.progress;
       max *= r.skill * clamp(1 + gap / 1400, 0.93, 1.09);
     }
     if (r.boost > 0) max = 55;

@@ -1,8 +1,10 @@
 import {itemRoulette} from "./item-roulette.js";
+import { normalizeLaps } from './race-settings.js';
+import { QUALITY, renderScale, duoRenderScale, gpuInfo, loadQuality, performanceMeter } from './graphics.js';
 import {raceEffects} from "./race-effects.js";
 import {itemPortraits} from "./item-portraits.js";
-import {raceLettering,lapBoard} from "./hud-lettering.js";
-import {boostScreen} from "./boost-screen.js";
+import {raceLettering,racePosition,lapBoard} from "./hud-lettering.js";
+import {boostScreen,createBoostFeedback} from "./boost-screen.js";
 import { loadSourceWorld } from './source-world.js';
 import { RoundedBoxGeometry } from "/vendor/three-examples/geometries/RoundedBoxGeometry.js";
 import { makeHoverGlow, updateHoverGlow } from "./hover-effects.js";
@@ -51,6 +53,8 @@ import {
 import { addAtmosphere } from "./atmosphere.js";
 import { roadFrame, chasePose, cameraClearance } from "./visual-frame.js";
 import { WheelInput } from "./input.js";
+import { DuoLobby } from './duo-lobby.js';
+import { splitViewport } from './split-viewport.js';
 import { KartAudio } from "./audio.js";
 import {
   proceduralKart,
@@ -67,6 +71,13 @@ const $ = (id) => document.getElementById(id),
 await loadSourcePortraits();
 const renderedItemIcons=itemPortraits();
 const updateItemReel=itemRoulette($("item-icon"),{...ITEM_ICONS,...renderedItemIcons},ITEMS);
+const splitItemReels = Array.from({length:4}, (_, slot) => {
+  const frame = $(`duo-item-${slot}`);
+  const icon = document.createElement('div');
+  icon.className = 'split-item-icon';
+  frame.replaceChildren(icon);
+  return itemRoulette(icon, {...ITEM_ICONS,...renderedItemIcons}, ITEMS);
+});
 const updateBoostScreen=boostScreen($("speed-lines"));
 let boostFeedback={strength:0,kick:0};
 window.addEventListener("error", (e) => {
@@ -75,10 +86,18 @@ window.addEventListener("error", (e) => {
 });
 const renderer = new THREE.WebGLRenderer({
   canvas,
-  antialias: true,
+  // Antialias once in the composer, rather than also on the output canvas.
+  antialias: false,
   powerPreference: "high-performance",
 });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 1.6));
+let qualityName = loadQuality();
+let quality = QUALITY[qualityName];
+let mode = 'solo';
+const playerColors = ['#ff5267', '#5eaaff', '#63d978', '#ffe067'];
+const activeCount = () => mode === 'quad' ? 4 : mode === 'duo' ? 2 : 1;
+const splitMode = () => mode !== 'solo';
+const gpu = gpuInfo(renderer.getContext());
+renderer.setPixelRatio(renderScale(innerWidth, innerHeight, devicePixelRatio, quality));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -94,6 +113,9 @@ const camera = new THREE.PerspectiveCamera(
   0.2,
   1100,
 );
+const camera2 = camera.clone();
+const camera3 = camera.clone();
+const camera4 = camera.clone();
 const pmrem = new THREE.PMREMGenerator(renderer);
 const room = new RoomEnvironment();
 scene.environment = pmrem.fromScene(room, 0.04).texture;
@@ -132,7 +154,7 @@ const trackLights = [-2, -1, 0, 1, 2].map((side) => {
 });
 const renderTarget = new THREE.WebGLRenderTarget(innerWidth, innerHeight, {
   type: THREE.HalfFloatType,
-  samples: 4,
+  samples: Math.min(quality.samples, renderer.capabilities.maxSamples),
 });
 const composer = new EffectComposer(renderer, renderTarget);
 composer.addPass(new RenderPass(scene, camera));
@@ -185,10 +207,75 @@ if (world.source) {
   useSourceTrack(world.route);
   camera.far = 2500;
   camera.updateProjectionMatrix();
+  camera2.far = 2500;
+  camera2.updateProjectionMatrix();
+  for (const viewCamera of [camera3, camera4]) {
+    viewCamera.far = 2500;
+    viewCamera.updateProjectionMatrix();
+  }
 }
 // The source stadium has 16:9 panels; generated scenery uses 4:3 panels.
 const broadcast = stadiumBroadcast(renderer, scene, world.screenMaterials,
   world.source ? {width:768,height:432} : undefined);
+function applyGraphics() {
+  quality = QUALITY[qualityName];
+  const scale = splitMode()
+    ? duoRenderScale(innerWidth, innerHeight, devicePixelRatio, quality)
+    : renderScale(innerWidth, innerHeight, devicePixelRatio, quality);
+  renderer.setPixelRatio(scale);
+  renderer.setSize(innerWidth, innerHeight);
+  camera.aspect = (splitMode() ? innerWidth / 2 : innerWidth) / (mode === 'quad' ? innerHeight / 2 : innerHeight);
+  camera.updateProjectionMatrix();
+  for (const viewCamera of [camera2, camera3, camera4]) {
+    viewCamera.aspect = (innerWidth / 2) / (mode === 'quad' ? innerHeight / 2 : innerHeight);
+    viewCamera.updateProjectionMatrix();
+  }
+  for (const target of [composer.renderTarget1, composer.renderTarget2]) {
+    const samples = splitMode() ? 0 : Math.min(quality.samples, renderer.capabilities.maxSamples);
+    if (target.samples !== samples) { target.samples = samples; target.dispose(); }
+  }
+  composer.setPixelRatio(scale);
+  composer.setSize(innerWidth, innerHeight);
+  ambientOcclusion.enabled = mode === 'solo' && quality.ao;
+  bloom.enabled = mode === 'solo' && quality.bloom;
+  const shadowsEnabled = !splitMode() && quality.shadows;
+  if (renderer.shadowMap.enabled !== shadowsEnabled) {
+    renderer.shadowMap.enabled = shadowsEnabled;
+    // Shadow support is compiled into material shaders. Refresh the cached
+    // programs when switching presets/modes, before disposing the old map.
+    const materials = new Set();
+    scene.traverse(object => {
+      for (const material of (Array.isArray(object.material) ? object.material : [object.material]))
+        if (material) materials.add(material);
+    });
+    for (const material of materials) material.needsUpdate = true;
+  }
+  if (key.shadow.mapSize.x !== quality.shadowSize) {
+    key.shadow.mapSize.set(quality.shadowSize, quality.shadowSize);
+    key.shadow.map?.dispose();
+    key.shadow.map = null;
+  }
+  renderer.shadowMap.needsUpdate = true;
+  broadcast.setRate(splitMode() ? 0 : quality.broadcastHz);
+  $('graphics-quality').value = qualityName;
+}
+applyGraphics();
+$('graphics-quality').addEventListener('change', event => {
+  qualityName = event.target.value;
+  try { localStorage.setItem('openwii.kart.graphics.v1', qualityName); } catch { /* Optional. */ }
+  applyGraphics();
+});
+$('graphics-gpu').textContent = gpu.renderer;
+$('graphics-advice').textContent = gpu.software
+  ? 'Software rendering detected. Enable graphics acceleration in your browser settings and restart the browser.'
+  : gpu.nvidia
+    ? 'NVIDIA hardware rendering active.'
+    : 'For the RTX GPU: Windows Settings > System > Display > Graphics > your browser > Options > High performance, then restart the browser.';
+const updatePerformance = performanceMeter(({fps, frameMs}) => {
+  $('graphics-fps').textContent = `${fps} FPS`;
+  const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+  $('graphics-stats').textContent = `${frameMs.toFixed(1)} ms/frame · ${size.x} × ${size.y} · ${renderer.info.render.calls} draw calls · ${Math.round(renderer.info.render.triangles / 1000)}k triangles`;
+});
 addAtmosphere(scene);
 // Consolidate static scenery by material. No dynamic light/firework meshes are
 // included; source object transforms are baked, preserving exact geometry.
@@ -253,8 +340,9 @@ for (const { mat, geos, cast } of staticGroups.values()) {
   scene.add(m);
   geos.forEach((x) => x.dispose());
 }
+let lobby = new DuoLobby();
 let selected = "mario",
-  selectedLaps = localStorage.getItem("openwii.kart.laps") === "1" ? 1 : 3,
+  selectedLaps = normalizeLaps(localStorage.getItem("openwii.kart.laps")),
   paused = false,
   race,
   noticeUntil = 0,
@@ -267,6 +355,38 @@ const audio = new KartAudio(),
     invert: localStorage.getItem("openwii.chargeInvert2") === "1",
   }),
   keys = new Set();
+const wheels = [wheel, new WheelInput(), new WheelInput(), new WheelInput()];
+const captureUntils = Array(4).fill(performance.now() + 3000);
+const duoItemPulses = Array(4).fill(false), lastDuoItems = Array(4).fill(false);
+let duoSignalGraceUntil = 0;
+let presenceSlots = [];
+let keyboardPlayer2 = false;
+let quadKeyboardTest = false, keyboardSlot = 1;
+const keyboardP2Active = slot => (mode === 'duo' && keyboardPlayer2 && slot === 1) ||
+  (mode === 'quad' && quadKeyboardTest && slot >= 1 && slot < 4);
+function duoSlots() {
+  return Array.from({length: activeCount()}, (_, slot) => keyboardP2Active(slot)
+    ? { slot, occupied: true, identity: `local-keyboard-player-${slot + 1}` }
+    : presenceSlots[slot]);
+}
+function duoRemote(slot, now) {
+  const selected = mode === 'duo' || slot === keyboardSlot;
+  if (keyboardP2Active(slot)) return {
+    live: true, status: selected ? 'Keyboard test controller' : 'Keyboard test · idle',
+    steer: selected ? Number(keys.has('ArrowRight')) - Number(keys.has('ArrowLeft')) : 0,
+    gas: selected && keys.has('KeyZ'), brake: selected && keys.has('KeyX'),
+    drift: selected && (keys.has('ShiftLeft') || keys.has('ShiftRight')), item: false,
+  };
+  return wheels[slot].read(now);
+}
+function duoMotionReady(slot, now) {
+  return keyboardP2Active(slot) || (wheels[slot].armed && wheels[slot].read(now).live);
+}
+function splitRemoteStatus(slot, remote) {
+  if (keyboardP2Active(slot)) return remote.status;
+  if (!presenceSlots[slot]?.occupied) return 'Connect phone';
+  return remote.live ? remote.status : 'Wheel signal lost';
+}
 let captureUntil = performance.now() + 3000,
   usingPhone = false,
   phoneHadGas = false,
@@ -292,6 +412,8 @@ const shadowTexture = canvasTexture(64, 64, (ctx, w, h) => {
 function constructRace() {
   race = new Race({
     character: selected,
+    characters: splitMode() ? lobby.characters : undefined,
+    humanCount: activeCount(),
     laps: selectedLaps,
     seed: new URLSearchParams(location.search).has("evidence")
       ? 42
@@ -299,6 +421,7 @@ function constructRace() {
     onEvent: onEvent,
   });
   resultsShown = false;resultsPresentation=null;
+  for (const rig of cameraRigs) rig.initializedCamera = false;
   $('again').disabled=false;
   for (const k of karts) {
     k.disposed = true;
@@ -368,19 +491,46 @@ function constructRace() {
 }
 const link = new GameLink({
   onOrientation: (sample, slot) => {
-    if (slot !== 0) return;
-    usingPhone = true;
-    wheel.sample(sample, performance.now(), {
+    if (keyboardP2Active(slot)) return;
+    if (slot < 0 || slot >= activeCount()) return;
+    if (mode === 'solo') usingPhone = true;
+    wheels[slot].sample(sample, performance.now(), {
       canCapture:
         race?.state === "ready" ||
         race?.state === "countdown" ||
-        performance.now() < captureUntil,
+        performance.now() < (mode === 'solo' ? captureUntil : captureUntils[slot]),
     });
+    if (splitMode() && race?.state === 'ready') syncDuoLobby();
   },
   onCommand: (cmd, slot) => {
-    if (slot !== 0) return;
+    if (keyboardP2Active(slot)) return;
+    if (slot < 0 || slot >= activeCount()) return;
     const now = performance.now();
-    wheel.command(cmd, now);
+    wheels[slot].command(cmd, now);
+    if (splitMode()) {
+      if (cmd.type === 'recentre' || cmd.type === 'calibrate') {
+        wheels[slot].reset();
+        captureUntils[slot] = now + 10000;
+        if (race?.state !== 'ready') pause(`P${slot + 1} is recentering the wheel.`);
+      }
+      if (cmd.type === 'button' && cmd.pressed !== false) {
+        if (race.state === 'ready') {
+          if (['left', 'right', 'up', 'down'].includes(cmd.button)) {
+            if (lobby.choose(slot, cmd.menuDirection || cmd.button)) { audio.ui('cursor'); sendProfile(); }
+          } else if (cmd.button === '1') lobby.cancel(slot);
+          else if (cmd.button === '2') {
+            const motion = wheels[slot].read(now);
+            if (lobby.setReady(slot, presenceSlots[slot]?.identity, motion.live && wheels[slot].armed)) audio.ui('confirm');
+          }
+          syncDuoLobby();
+          return;
+        }
+        if (paused && cmd.button === '2') { resume(); return; }
+        if (race.state === 'racing' && cmd.button === 'right' && !paused) duoItemPulses[slot] = true;
+        if (race.state === 'results' && cmd.button === '2') confirm();
+      }
+      return;
+    }
     if (cmd.type === "home") {
       audio.ui('cancel').then(()=>setTimeout(()=>location.href="/",100));
       return;
@@ -400,6 +550,17 @@ const link = new GameLink({
     }
   },
   onPresence: (p) => {
+    presenceSlots = p.slots || [];
+    if (splitMode()) {
+      $('connection').textContent = splitConnectionLabel();
+      for (let slot = 0; slot < activeCount(); slot++)
+        if (!keyboardP2Active(slot) && !presenceSlots[slot]?.occupied) wheels[slot].release();
+      if (race && !['ready', 'results'].includes(race.state) && !lobby.sameParticipants(duoSlots()))
+        pause('A player disconnected. The same phones must reconnect.');
+      syncDuoLobby();
+      sendProfile();
+      return;
+    }
     $("connection").textContent = p.controller
       ? "PHONE CONNECTED · P1"
       : "KEYBOARD READY";
@@ -414,13 +575,23 @@ const link = new GameLink({
 });
 function sendProfile() {
   link.feedback({ type: "controller-profile", profile: "wheel", slot: 0 });
+  for (let slot = 1; slot < 4; slot++) {
+    link.feedback({ type: 'controller-profile', profile: slot < activeCount() && !keyboardP2Active(slot) ? 'wheel' : 'default', slot });
+  }
+  for (let slot = 0; slot < activeCount(); slot++) {
+    if (keyboardP2Active(slot)) continue;
+    const characterId = splitMode() ? lobby.characters[slot] : selected;
+    link.feedback({ type: 'controller-player', slot,
+      playerLabel: `P${slot + 1} · ${CHARACTERS.find(c => c.id === characterId).name}`,
+      playerColor: playerColors[slot] });
+  }
 }
 const profileTimer = setInterval(sendProfile, 850);
 function onEvent(e) {
   if(e.type==='box' && race.boxes[e.box]){const b=race.boxes[e.box];effects.box(surfaceAt(b.s,b.lateral),race.time);}
   if(e.type==='contact'){
     burst(race.racers[e.racer],5,'#fff1b8');
-    if(e.racer===0)link.feedback({type:'rumble',pattern:[35],slot:0});
+    if(e.racer < race.humanCount)link.feedback({type:'rumble',pattern:[35],slot:e.racer});
   }
   if(e.type==='hit' && race?.racers[e.racer]){
     const r=race.racers[e.racer];burst(r,28,e.cause==='blue'?'#98dbff':'#fff0a0');
@@ -430,6 +601,8 @@ function onEvent(e) {
     }
   }
   audio.event(e, race);
+  if (e.type === 'hit' && e.racer < race.humanCount)
+    link.feedback({ type: 'rumble', pattern: [80, 40, 80], slot: e.racer });
   if (e.racer !== 0) return;
   if(e.type==='useItem'){$('item-frame').dataset.used=String(race.time);$('item-icon').animate([{transform:'scale(1)',opacity:1},{transform:'scale(1.3)',opacity:0}],{duration:150});}
   if(e.type==='itemReady')$('item-frame').animate([{filter:'brightness(2)',transform:'scale(1.15)'},{filter:'brightness(1)',transform:'scale(1)'}],{duration:250});
@@ -440,7 +613,7 @@ function onEvent(e) {
       e.tier
     ],
     finalLap: "FINAL LAP",
-    lap: "LAP 2",
+    lap: `LAP ${race.player.lap}`,
     finish: "FINISH!",
     glider: "TAKE FLIGHT!",
     antigrav: "ANTI-GRAVITY",
@@ -450,7 +623,7 @@ function onEvent(e) {
   if (labels[e.type]) {
     $('notice').dataset.kind=e.type;
     $('notice').innerHTML=e.type==='finish'?raceLettering('FINISH!'):['lap','finalLap'].includes(e.type)?'<div class="lap-sign"></div>':labels[e.type];
-    if(['lap','finalLap'].includes(e.type))$('notice').firstElementChild.innerHTML=lapBoard(e.type==='finalLap'?3:2);
+    if(['lap','finalLap'].includes(e.type))$('notice').firstElementChild.innerHTML=lapBoard(race.player.lap,race.laps);
     $('notice').getAnimations().forEach(a=>a.cancel());
     $('notice').animate(e.type==='finish'?[{opacity:0,scale:'1.45'},{opacity:1,scale:'1',offset:.22},{opacity:1,scale:'1'}]:[{opacity:0,translate:'70px 0'},{opacity:1,translate:'0 0',offset:.2},{opacity:1,translate:'0 0',offset:.8},{opacity:0,translate:'20px -25px'}],{duration:1500});
     $("notice").dataset.essential = String(
@@ -461,11 +634,164 @@ function onEvent(e) {
   if (e.type === "hit") {
     hitUntil = (race?.time || 0) + 1;
     burst(race.player, 36, "#ffd755");
-    link.feedback({ type: "rumble", pattern: [80, 40, 80], slot: 0 });
   }
   if (e.type === "coin") burst(race.player, 10, "#ffdf46");
 }
 let starting = false, driverConfirmed = false;
+function splitConnectionLabel() {
+  return Array.from({length: activeCount()}, (_, slot) =>
+    `P${slot + 1} ${keyboardP2Active(slot) ? 'KEYBOARD TEST' :
+      presenceSlots[slot]?.occupied ? 'CONNECTED' : 'WAITING'}`).join(' · ');
+}
+function showDuoLobby() {
+  $('intro').hidden = false;
+  $('track-label').hidden = true;
+  $('hud').hidden = true;
+  $('duo-hud').hidden = true;
+  $('results').hidden = true;
+  $('duo-lobby').hidden = false;
+  syncDuoLobby();
+}
+function syncDuoLobby() {
+  if (!splitMode() || !race) return;
+  $('connection').textContent = splitConnectionLabel();
+  const now = performance.now();
+  const live = Array.from({length: activeCount()}, (_, slot) => duoMotionReady(slot, now));
+  const slots = duoSlots();
+  if (race.state === 'ready') lobby.sync(slots, live);
+  for (let slot = 0; slot < activeCount(); slot++) {
+    const c = CHARACTERS.find(character => character.id === lobby.characters[slot]);
+    $(`duo-portrait-${slot}`).src = portrait(c);
+    $(`duo-portrait-${slot}`).alt = c.name;
+    $(`duo-driver-${slot}`).textContent = c.name;
+    $(`duo-state-${slot}`).textContent = keyboardP2Active(slot)
+      ? (lobby.ready[slot] ? 'READY · KEYBOARD TEST' : mode === 'duo' ? 'Press Enter to ready' : 'Keyboard · ready on computer') : !slots[slot]?.occupied ? 'Connect phone' :
+      !live[slot] ? 'Hold level to calibrate' : lobby.ready[slot] ? 'READY' : 'Press 2 to ready';
+  }
+  if (race.state === 'ready' && lobby.canStart(slots, live)) beginDuo();
+}
+async function beginDuo() {
+  if (starting || !splitMode() || race.state !== 'ready') return;
+  starting = true;
+  await audio.ui('start');
+  starting = false;
+  const live = Array.from({length: activeCount()}, (_, slot) => duoMotionReady(slot, performance.now()));
+  if (!lobby.canStart(duoSlots(), live)) return;
+  constructRace();
+  race.start();
+  // Rebuilding the eight visual karts may block sensor callbacks briefly.
+  // Wait for fresh packets before advancing the shared countdown.
+  duoSignalGraceUntil = performance.now() + 1500;
+  $('intro').hidden = true;
+  $('track-label').hidden = true;
+  $('hud').hidden = false;
+  $('duo-hud').hidden = false;
+  $('results').hidden = true;
+  applyGraphics();
+  noticeUntil = 0;
+}
+function setMode(next) {
+  if (race.state !== 'ready' || starting) return;
+  mode = next === 'duo' || next === 'quad' ? next : 'solo';
+  document.body.classList.toggle('duo', splitMode());
+  document.body.classList.toggle('quad', mode === 'quad');
+  document.querySelectorAll('[data-mode]').forEach(button =>
+    button.setAttribute('aria-pressed', String(button.dataset.mode === mode)));
+  $('duo-lobby').hidden = !splitMode();
+  $('keyboard-test').closest('label').hidden = mode !== 'duo';
+  $('keyboard-test-help').hidden = mode !== 'duo' || !keyboardPlayer2;
+  syncQuadKeyboardUI();
+  $('duo-instructions').textContent = mode === 'quad'
+    ? quadKeyboardTest
+      ? 'Connect your phone as P1 and calibrate normally. Ready Players 2–4 on the computer, then press 2 on your phone to start.'
+      : 'Connect four phones. Hold each sideways and level to calibrate, choose distinct drivers with the crosspads, then press 2 on every phone.'
+    : keyboardPlayer2
+      ? 'Connect one phone as P1. Hold it sideways and level, choose your driver with its crosspad, then press 2. Use the computer arrows to choose P2’s driver and Enter to ready.'
+      : 'Connect two phones. Hold each one sideways and level to calibrate, choose a driver with the crosspad, then press 2 on each phone.';
+  $('track-label').hidden = splitMode();
+  $('characters').hidden = splitMode();
+  $('chosen').hidden = splitMode();
+  $('start').hidden = splitMode();
+  $('menu-hint').hidden = splitMode();
+  if (splitMode()) {
+    lobby = new DuoLobby(activeCount());
+    for (const w of wheels) w.reset();
+    captureUntils.fill(performance.now() + 10000);
+  }
+  document.querySelectorAll('.duo-choice, .duo-player').forEach((element, slot) => {
+    element.hidden = slot % 4 >= activeCount();
+  });
+  constructRace();
+  applyGraphics();
+  syncDuoLobby();
+  sendProfile();
+}
+for (const button of document.querySelectorAll('[data-mode]'))
+  button.onclick = () => setMode(button.dataset.mode);
+function syncQuadKeyboardUI() {
+  $('quad-keyboard-test').closest('label').hidden = mode !== 'quad';
+  $('quad-keyboard-help').hidden = mode !== 'quad' || !quadKeyboardTest;
+  const controls = $('quad-test-controls');
+  controls.hidden = mode !== 'quad' || !quadKeyboardTest;
+  const host = race?.state === 'ready' ? $('duo-lobby') : document.body;
+  if (controls.parentElement !== host) {
+    if (host === document.body) host.append(controls);
+    else host.insertBefore(controls, host.querySelector('.duo-choices'));
+  }
+}
+$('quad-keyboard-test').addEventListener('change', event => {
+  if (race.state !== 'ready' || starting || mode !== 'quad') {
+    event.target.checked = quadKeyboardTest;
+    return;
+  }
+  quadKeyboardTest = event.target.checked;
+  keys.clear();
+  for (let slot = 1; slot < 4; slot++) {
+    lobby.cancel(slot);
+    wheels[slot].reset();
+    captureUntils[slot] = performance.now() + 10000;
+    duoItemPulses[slot] = lastDuoItems[slot] = false;
+  }
+  syncQuadKeyboardUI();
+  $('duo-instructions').textContent = quadKeyboardTest
+    ? 'Connect your phone as P1 and calibrate normally. Ready Players 2–4 on the computer, then press 2 on your phone to start.'
+    : 'Connect four phones. Hold each sideways and level to calibrate, choose distinct drivers with the crosspads, then press 2 on every phone.';
+  canvas.focus({preventScroll:true});
+  syncDuoLobby();
+  sendProfile();
+});
+for (const button of document.querySelectorAll('[data-keyboard-slot]')) {
+  button.addEventListener('click', () => {
+    keyboardSlot = Number(button.dataset.keyboardSlot);
+    keys.clear();
+    duoItemPulses.fill(false);
+    lastDuoItems.fill(false);
+    document.querySelectorAll('[data-keyboard-slot]').forEach(el =>
+      el.setAttribute('aria-pressed', String(Number(el.dataset.keyboardSlot) === keyboardSlot)));
+    canvas.focus({preventScroll:true});
+  });
+}
+$('quad-ready-all').addEventListener('click', () => {
+  if (mode !== 'quad' || !quadKeyboardTest || race.state !== 'ready' || starting) return;
+  for (let slot = 1; slot < 4; slot++) lobby.setReady(slot, duoSlots()[slot].identity, true);
+  canvas.focus({preventScroll:true});
+  syncDuoLobby();
+});
+$('keyboard-test').addEventListener('change', event => {
+  if (race.state !== 'ready' || starting) { event.target.checked = keyboardPlayer2; return; }
+  keyboardPlayer2 = event.target.checked;
+  $('keyboard-test-help').hidden = !keyboardPlayer2;
+  $('duo-instructions').textContent = keyboardPlayer2
+    ? 'Connect one phone as P1. Hold it sideways and level, choose your driver with its crosspad, then press 2. Use the computer arrows to choose P2’s driver and Enter to ready.'
+    : 'Connect two phones. Hold each one sideways and level to calibrate, choose a driver with the crosspad, then press 2 on each phone.';
+  lobby.cancel(1);
+  keys.clear();
+  wheels[1].release();
+  duoItemPulses[1] = lastDuoItems[1] = false;
+  canvas.focus({ preventScroll: true });
+  syncDuoLobby();
+  sendProfile();
+});
 function setDriverConfirmed(value) {
   driverConfirmed = value;
   $('intro').classList.toggle('driver-confirmed',value);
@@ -490,13 +816,14 @@ function chooseDriver(index) {
 }
 function selectLaps(laps) {
   if (race.state !== 'ready' || starting) return;
-  selectedLaps = laps === 1 ? 1 : 3;
+  selectedLaps = normalizeLaps(laps);
   race.laps = selectedLaps;
   localStorage.setItem('openwii.kart.laps', String(selectedLaps));
   syncLapOptions();
   audio.ui('cursor');
 }
 function syncLapOptions() {
+  $('lap-count').value = String(selectedLaps);
   document.querySelectorAll('[data-laps]').forEach(button => {
     button.setAttribute('aria-pressed', String(Number(button.dataset.laps) === selectedLaps));
   });
@@ -505,10 +832,13 @@ function syncLapOptions() {
 for (const button of document.querySelectorAll('[data-laps]')) {
   button.onclick = () => selectLaps(Number(button.dataset.laps));
 }
+$('lap-count').addEventListener('change', event => selectLaps(event.target.value));
+$('lap-decrease').onclick = () => selectLaps(selectedLaps - 1);
+$('lap-increase').onclick = () => selectLaps(selectedLaps + 1);
 syncLapOptions();
 function navigateDriver(direction) {
   if (driverConfirmed) {
-    if (direction === 'left' || direction === 'right') selectLaps(selectedLaps === 1 ? 3 : 1);
+    if (direction === 'left' || direction === 'right') selectLaps(selectedLaps + (direction === 'right' ? 1 : -1));
     return;
   }
   const index=CHARACTERS.findIndex(c=>c.id===selected);
@@ -537,6 +867,14 @@ async function begin() {
 function confirm() {
   if (paused) {
     resume();
+    return;
+  }
+  if (splitMode()) {
+    if (race.state === 'results' && resultsPresentation?.done) {
+      lobby.ready.fill(false);
+      constructRace();
+      showDuoLobby();
+    }
     return;
   }
   if (race.state === 'ready') {
@@ -573,12 +911,24 @@ function pause(reason = "Take a breath. The race will wait.") {
   paused = true;
   $("hud").getAnimations({subtree:true}).forEach(a=>a.pause());
   keys.clear();
-  wheel.release();
+  duoItemPulses.fill(false);
+  lastDuoItems.fill(false);
+  for (const w of (splitMode() ? wheels.slice(0, activeCount()) : [wheel])) w.release();
+  if (splitMode()) captureUntils.fill(performance.now() + 10000);
   $("pause-reason").textContent = reason;
   $("pause").hidden = false;
   audio.engine.ctx?.suspend();
 }
 function resume() {
+  if (splitMode() && !['ready', 'results'].includes(race.state)) {
+    const live = Array.from({length: activeCount()}, (_, slot) => duoMotionReady(slot, performance.now())).every(Boolean);
+    if (!lobby.sameParticipants(duoSlots()) || !live) {
+      $('pause-reason').textContent = keyboardP2Active(1)
+        ? 'Reconnect Player 1’s phone and hold it level until the wheel is ready.'
+        : `Reconnect all ${activeCount()} original phones and hold them level until every wheel is ready.`;
+      return;
+    }
+  }
   paused = false;
   $("hud").getAnimations({subtree:true}).forEach(a=>{if(a.playState==="paused")a.play();});
   $("pause").hidden = true;
@@ -593,6 +943,9 @@ document.addEventListener('click', e => {
   }else audio.ui('confirm');
 });
 window.addEventListener("keydown", (e) => {
+  if (e.target.closest?.('#graphics-panel')) return;
+  if (e.target.id === 'lap-count') return;
+  if (['keyboard-test', 'quad-keyboard-test'].includes(e.target.id) && ['Space', 'Enter'].includes(e.code)) return;
   const handled = [
     "ArrowLeft",
     "ArrowRight",
@@ -611,15 +964,30 @@ window.addEventListener("keydown", (e) => {
   if (handled.includes(e.code)) e.preventDefault();
   if (e.repeat) return;
   keys.add(e.code);
-  if (race.state === 'ready' && e.code.startsWith('Arrow')) {
+  const localSlot = mode === 'quad' ? keyboardSlot : 1;
+  if (keyboardP2Active(localSlot) && race.state === 'ready') {
+    if (e.code.startsWith('Arrow')) {
+      if (lobby.choose(localSlot, e.code.slice(5).toLowerCase())) audio.ui('cursor');
+      sendProfile();
+    }
+    if (e.code === 'Enter') lobby.setReady(localSlot, duoSlots()[localSlot].identity, true);
+    if (e.code === 'KeyX') lobby.cancel(localSlot);
+    syncDuoLobby();
+    return;
+  }
+  if (mode === 'solo' && race.state === 'ready' && e.code.startsWith('Arrow')) {
     navigateDriver(e.code.slice(5).toLowerCase());
     return;
   }
-  if (e.code === 'Escape' && race.state === 'ready') { cancelDriver(); return; }
+  if (e.code === 'Escape' && race.state === 'ready') { if (mode === 'solo') cancelDriver(); return; }
   if (e.code === "Enter") confirm();
-  if (e.code === "Space") itemPulse = true;
+  if (e.code === "Space") {
+    if (keyboardP2Active(localSlot) && !paused && race.state === 'racing') duoItemPulses[localSlot] = true;
+    else itemPulse = true;
+  }
   if (e.code === "Escape") paused ? resume() : pause();
   if (e.code === "KeyR") {
+    if (splitMode()) return;
     wheel.reset();
     captureUntil = performance.now() + 10000;
     if (usingPhone && race.state === "racing")
@@ -643,6 +1011,8 @@ document.addEventListener("visibilitychange", () => {
 window.addEventListener("pagehide", () => {
   clearInterval(profileTimer);
   link.feedback({ type: "controller-profile", profile: "default", slot: 0 });
+  for (let slot = 1; slot < 4; slot++)
+    link.feedback({ type: 'controller-profile', profile: 'default', slot });
   audio.stop();
 });
 // Pickups: shared geometries, predictable pools, no allocation as racers lap.
@@ -866,20 +1236,19 @@ function burst(r, n, color) {
 }
 const objectMeshes = new Map();
 const itemImpacts=[];
-const camTarget = new V(),
-  unconstrainedEye = new V(),
-  sceneryOffset = new V(),
-  cameraAimTarget = new V(),
-  cameraAim = new V(),
-  cameraUp = new V(0, 1, 0);
+function makeCameraRig(viewCamera) {
+  return { camera: viewCamera, camTarget: new V(), unconstrainedEye: new V(),
+    sceneryOffset: new V(), cameraAimTarget: new V(), cameraAim: new V(),
+    cameraUp: new V(0, 1, 0), initializedCamera: false,
+    lastFlightCamera: null, landingCamera: null, updateBoost: createBoostFeedback() };
+}
+const cameraRigs = [camera, camera2, camera3, camera4].map(makeCameraRig);
 const basis = new THREE.Matrix4(),
   basisX = new V(),
   basisY = new V(),
   basisZ = new V();
 const frameTimes = [];
 let previousDrawTime = 0;
-let initializedCamera = false;
-let lastFlightCamera = null, landingCamera = null;
 function draw(dt, now) {
   const p = race.player,
     time = race.time;
@@ -890,7 +1259,7 @@ function draw(dt, now) {
   for (const [i, r] of race.racers.entries()) {
     const k = karts[i],
       path = activeSurfaceTrack ? surfaceAt(r.s,r.lateral) : trackAt(r.s);
-    const cast = i === 0 || Math.hypot(r.x - p.x, r.z - p.z) < 18;
+    const cast = i < race.humanCount || race.players.some(human => Math.hypot(r.x - human.x, r.z - human.z) < 18);
     if (k.cast !== cast) {
       k.model.traverse((o) => {
         if (o.isMesh) o.castShadow = cast;
@@ -953,6 +1322,7 @@ function draw(dt, now) {
     }
     updateHoverGlow(k, r, hop);
     updateGlider(k.glider,r,time);
+    k.glider.userData.baseVisible = k.glider.visible;
     // The airborne spline is the flight corridor, not a physical surface.
     // Its lower landing road is at ground level; the shadow belongs there.
     k.shadow.position.set(r.x, r.gliding ? 0.09 : r.y + 0.04, r.z);
@@ -970,11 +1340,11 @@ function draw(dt, now) {
   }
   effects.update(paused?0:dt,innerHeight);
   for (const [i, m] of coinMeshes.entries()) {
-    m.visible = race.coins[i].respawn === 0 && m.getWorldPosition(basisX).distanceTo(camera.position) > 1.6;
+    m.visible = race.coins[i].respawn === 0;
     m.rotation.z = now * 0.003;
   }
   for (const [i, g] of boxMeshes.entries()) {
-    g.visible = race.boxes[i].respawn === 0 && g.getWorldPosition(basisX).distanceTo(camera.position) > 1.2;
+    g.visible = race.boxes[i].respawn === 0;
     g.rotation.y = now * 0.001;
     g.rotation.z = Math.sin(now * 0.001 + i) * 0.2;
   }
@@ -1029,6 +1399,31 @@ function draw(dt, now) {
   particleGeo.attributes.position.needsUpdate = true;
   particleGeo.attributes.color.needsUpdate = true;
   boostFeedback=updateBoostScreen(race.time,p.boost);
+  renderer.info.reset();
+  renderer.info.autoReset = false;
+  if (splitMode()) {
+    renderer.setScissorTest(true);
+    for (let view = 0; view < activeCount(); view++) renderView(dt, now, view);
+    renderer.setScissorTest(false);
+    renderer.setViewport(0, 0, innerWidth, innerHeight);
+    renderer.setScissor(0, 0, innerWidth, innerHeight);
+  } else renderView(dt, now, 0);
+  if (!document.hidden) updatePerformance(now);
+  renderCount++;
+  if (previousDrawTime && !document.hidden) {
+    frameTimes.push(now - previousDrawTime);
+    if (frameTimes.length > 18000) frameTimes.shift();
+  }
+  previousDrawTime = now;
+  updateHUD();
+}
+function renderView(dt, now, view) {
+  const p = race.players[view], time = race.time;
+  const rig = cameraRigs[view];
+  const { camera, camTarget, unconstrainedEye, sceneryOffset, cameraAimTarget,
+    cameraAim, cameraUp } = rig;
+  let { initializedCamera, lastFlightCamera, landingCamera } = rig;
+  const viewBoost = splitMode() ? rig.updateBoost(time, p.boost) : boostFeedback;
   const desired = chasePose(p.jump?{...p,surfaceForward:null,surfaceNormal:{x:0,y:1,z:0}}:p);
   // Blend camera offsets after contact so the steep flight camera does not
   // drop instantly to ground chase height. Keep following the moving kart;
@@ -1059,7 +1454,7 @@ function draw(dt, now) {
   } else {
     lastFlightCamera = landingCamera = null;
   }
-  const finishBlend = p.finishTime === null ? 0 : THREE.MathUtils.smoothstep(race.time - (race.finishedAt ?? race.time), 0, .9);
+  const finishBlend = p.finishTime === null ? 0 : THREE.MathUtils.smoothstep(race.time - (p.finishedAt ?? race.finishedAt ?? race.time), 0, .9);
   if (p.finishTime !== null) {
     const basis = roadFrame(p.s, p.lateral, p.heading, p.surfaceForward, p.surfaceNormal);
     const angle = Math.PI * (1 - finishBlend), radius = THREE.MathUtils.lerp(9.6, 8, finishBlend);
@@ -1093,25 +1488,25 @@ function draw(dt, now) {
   }
   // Smooth the intended rig independently. Feeding corrected eyes back into
   // smoothing makes the camera repeatedly drift into and jump off the rail.
-  const safe = cameraClearance(unconstrainedEye, race.player.s);
+  const safe = cameraClearance(unconstrainedEye, p.s);
   camera.position.copy(safe);
   const cameraNormal = activeSurfaceTrack && !p.gliding ? (p.surfaceNormal||surfaceAt(p.s,p.lateral).normal) : {x:0,y:1,z:0};
   const cameraFocus = new V(p.x+cameraNormal.x*1.3,p.y+cameraNormal.y*1.3,p.z+cameraNormal.z*1.3);
-  const headFocus = driverCameraAnchor(karts[0].model,cameraFocus);
-  const upperHeadFocus = driverCameraAnchor(karts[0].model,cameraFocus,true);
+  const headFocus = driverCameraAnchor(karts[view].model,cameraFocus);
+  const upperHeadFocus = driverCameraAnchor(karts[view].model,cameraFocus,true);
   const beforeClearance = camera.position.clone();
   const resolvedEye = clearChaseView(cameraFocus,headFocus,camera.position,
     new V(cameraNormal.x,cameraNormal.y,cameraNormal.z),avoidScenery,upperHeadFocus);
   camera.position.copy(smoothChaseCorrection(beforeClearance,resolvedEye,cameraFocus,
     upperHeadFocus,avoidScenery,sceneryOffset,dt));
-  camera.position.copy(cameraClearance(camera.position, race.player.s));
+  camera.position.copy(cameraClearance(camera.position, p.s));
   camera.up.copy(cameraUp);
   camera.lookAt(clearanceLookTarget(beforeClearance,camera.position,headFocus,cameraAim));
   camera.fov +=
-    (57 + boostFeedback.strength*5 + boostFeedback.kick*2 + (p.gliding ? 3 : 0) - camera.fov) *
+    (57 + viewBoost.strength*5 + viewBoost.kick*2 + (p.gliding ? 3 : 0) - camera.fov) *
     (1 - Math.exp(-dt * 6));
   // Leave the racer visible to the left of the results table.
-  if (finishBlend > 0) camera.setViewOffset(innerWidth, innerHeight, innerWidth * .22 * finishBlend, 0, innerWidth, innerHeight);
+  if (finishBlend > 0 && mode === 'solo') camera.setViewOffset(innerWidth, innerHeight, innerWidth * .22 * finishBlend, 0, innerWidth, innerHeight);
   else camera.clearViewOffset();
   camera.updateProjectionMatrix();
   key.position.set(p.x - 30, p.y + 60, p.z + 25);
@@ -1144,38 +1539,44 @@ function draw(dt, now) {
     light.angle = underpass ? 0.85 : 0.7;
   }
   // Only hide a rival if the camera actually enters its body.
-  for (let i = 1; i < karts.length; i++) {
+  for (let i = 0; i < karts.length; i++) {
     const k = karts[i];
-    k.root.visible = rivalVisible(k.model, camera);
+    k.root.visible = i === view || rivalVisible(k.model, camera);
     // Canopies are wider than the body and need their own clearance.
+    k.glider.visible = k.glider.userData.baseVisible;
     if (k.glider.visible) {
       const canopy = k.root.localToWorld(new V(0, 3.3, 0));
       k.glider.visible = camera.position.distanceTo(canopy) > 5.3;
     }
   }
+  for (const [i, mesh] of coinMeshes.entries())
+    mesh.visible = race.coins[i].respawn === 0 && mesh.getWorldPosition(basisX).distanceTo(camera.position) > 1.6;
+  for (const [i, mesh] of boxMeshes.entries())
+    mesh.visible = race.boxes[i].respawn === 0 && mesh.getWorldPosition(basisX).distanceTo(camera.position) > 1.2;
   key.target.position.set(p.x, p.y, p.z);
   key.target.updateMatrixWorld();
-  renderer.info.reset();
-  renderer.info.autoReset = false;
-  broadcast.update(now, camera);
-  composer.render();
-  renderCount++;
-  if (previousDrawTime && !document.hidden) {
-    frameTimes.push(now - previousDrawTime);
-    if (frameTimes.length > 18000) frameTimes.shift();
+  if (splitMode()) {
+    const viewport = splitViewport(innerWidth, innerHeight, mode, view);
+    camera.aspect = viewport.width / viewport.height;
+    camera.updateProjectionMatrix();
+    renderer.setViewport(viewport.x, viewport.y, viewport.width, viewport.height);
+    renderer.setScissor(viewport.x, viewport.y, viewport.width, viewport.height);
+    renderer.render(scene, camera);
+  } else {
+    composer.render();
+    broadcast.update(now, camera);
   }
-  previousDrawTime = now;
-  updateHUD();
+  Object.assign(rig, { initializedCamera, lastFlightCamera, landingCamera });
 }
 function updateHUD() {
   document.body.classList.toggle("racing", race.state !== "ready");
+  syncQuadKeyboardUI();
+  if (splitMode()) updateDuoHUD();
   const p = race.player,
     position = race.position(p);
   raceNumerals($("coins"), String(p.coins).padStart(2, "0"));
   raceNumerals($("lap"), `${p.lap}/${race.laps}`);
-  if($('position').dataset.rank!==String(position)){
-    $('position').dataset.rank=String(position);
-    $('position').innerHTML=raceLettering(String(position),position===1?'gold':position===2?'silver':position===3?'bronze':'orange')+`<sup>${ordinal(position).replace(String(position),'')}</sup>`;
+  if(racePosition($('position'),position)){
     $('position').animate([{scale:'1.2'},{scale:'1'}],{duration:240});
   }
   $("speed-number").textContent = Math.round(Math.abs(p.speed) * 3.6);
@@ -1229,13 +1630,24 @@ function updateHUD() {
     .querySelectorAll("i")
     .forEach((el, i) => el.classList.toggle("on", i < 4 - race.count));
   drawMap();
-  if (["finishing", "results"].includes(race.state) && !resultsShown && audio.resultsReady) {
-    race.showResults();
+  if (race.state === 'results' && !resultsShown && audio.resultsReady) {
     resultsShown = true;
     $("results").hidden = false;
     $("hud").hidden = true;
-    $("result-summary").textContent =
-      `${p.character.name} · ${ordinal(position)} place · ${formatTime(p.finishTime)}`;
+    $('duo-hud').hidden = true;
+    const summaries = race.players.map((player, i) =>
+      `P${i + 1} ${player.character.name} · ${ordinal(race.position(player))} place · ${formatTime(player.finishTime)}`);
+    if (mode === 'quad') {
+      $('result-summary').replaceChildren(...summaries.map(summary => {
+        const line = document.createElement('span');
+        line.textContent = summary;
+        return line;
+      }));
+    } else {
+      $('result-summary').textContent = mode === 'duo'
+        ? summaries.join('    |    ')
+        : `${p.character.name} · ${ordinal(position)} place · ${formatTime(p.finishTime)}`;
+    }
     const standings=race.standings.slice();
     resultsPresentation={started:performance.now(),duration:1.2,done:false,times:standings.map(r=>r.finishTime)};
     $('again').disabled=true;
@@ -1243,7 +1655,7 @@ function updateHUD() {
     $("standings").innerHTML = standings
       .map(
         (r, i) =>
-          `<div class="standing ${r.id === 0 ? "me" : ""}" style="--row:${i}"><b>${i + 1}</b><img src="${portrait(r.character)}" alt=""><span>${r.character.name}</span><span class="time">${r.finishTime === null ? "—" : formatTime(0)}</span></div>`,
+          `<div class="standing ${r.id < race.humanCount ? "me" : ""}" style="--row:${i}"><b>${i + 1}</b><img src="${portrait(r.character)}" alt=""><span>${r.id < race.humanCount ? `P${r.id + 1} · ` : ''}${r.character.name}</span><span class="time">${r.finishTime === null ? "—" : formatTime(0)}</span></div>`,
       )
       .join("");
   }
@@ -1254,7 +1666,40 @@ function updateHUD() {
     if(progress===1){resultsPresentation.done=true;$('again').disabled=false;}
   }
 }
+function updateDuoHUD() {
+  if (race.state === 'ready') return;
+  for (const [i, p] of race.players.entries()) {
+    $(`duo-name-${i}`).textContent = p.character.name;
+    racePosition($(`duo-rank-${i}`),race.position(p));
+    raceNumerals($(`duo-lap-${i}`),`${Math.min(race.laps, p.lap)}/${race.laps}`);
+    raceNumerals($(`duo-coins-${i}`),String(p.coins).padStart(2,'0'));
+    raceNumerals($(`duo-speed-${i}`),String(Math.round(Math.abs(p.speed) * 3.6)));
+    const itemFrame = $(`duo-item-${i}`);
+    const recentlyUsed = !p.item && p.itemUse?.age < .16;
+    itemFrame.classList.toggle('empty', !p.item && p.roulette <= 0 && !recentlyUsed);
+    const itemLabel = p.roulette > 0 ? 'Item roulette' : p.item ? p.item.replaceAll('_',' ') : 'No item';
+    itemFrame.setAttribute('role','img');
+    itemFrame.setAttribute('aria-label',`Player ${i + 1}: ${itemLabel}`);
+    splitItemReels[i](race.time, p.roulette, p.item || (recentlyUsed ? p.itemUse.type : null));
+    $(`duo-finish-${i}`).hidden = p.finishTime === null;
+    if (!$(`duo-finish-${i}`).dataset.artwork) {
+      $(`duo-finish-${i}`).innerHTML = raceLettering('FINISH!');
+      $(`duo-finish-${i}`).dataset.artwork = 'true';
+    }
+  }
+}
 const mapCtx = $("minimap").getContext("2d");
+const playerMapContexts = Array.from({length:4}, (_, slot) => {
+  const canvas = document.createElement('canvas');
+  canvas.id = `player-minimap-${slot}`;
+  canvas.className = 'player-minimap';
+  canvas.width = 250;
+  canvas.height = 220;
+  canvas.setAttribute('role','img');
+  canvas.setAttribute('aria-label',`Player ${slot + 1} race minimap`);
+  $(`duo-hud-${slot}`).append(canvas);
+  return canvas.getContext('2d');
+});
 const mapPortraits = new Map(
   CHARACTERS.map((c) => {
     const im = new Image();
@@ -1292,17 +1737,32 @@ function drawMap() {
   c.fillRect(q[0] - 3, q[1] - 4, 6, 8);
   for (const r of [...race.racers].reverse()) {
     const q = to(r.x, r.z);
+    const human = splitMode() && r.id < race.humanCount;
+    const radius = splitMode() ? human ? 10 : 3 : r.id ? 4 : 6;
     c.beginPath();
-    c.arc(...q, r.id ? 4 : 6, 0, Math.PI * 2);
-    c.fillStyle = r.character.color;
+    c.arc(...q, radius, 0, Math.PI * 2);
+    c.fillStyle = human ? playerColors[r.id] : r.character.color;
     c.fill();
-    c.strokeStyle = r.id ? "#eef5ff" : "#fff8a1";
-    c.lineWidth = r.id ? 1.3 : 3;
+    c.strokeStyle = human ? playerColors[r.id] : r.id ? "#eef5ff" : "#fff8a1";
+    c.lineWidth = human ? 3 : r.id ? 1.3 : 3;
     c.stroke();
     const icon = mapPortraits.get(r.character.id);
-    if (icon?.complete) {
-      const size = r.id ? 15 : 21;
+    if (icon?.complete && icon.naturalWidth && (!splitMode() || human)) {
+      const size = splitMode() ? 14 : r.id ? 15 : 21;
       c.drawImage(icon, q[0] - size / 2, q[1] - size / 2, size, size);
+    }
+  }
+  if (splitMode()) {
+    // Draw the track/pack once; share that small canvas across the active HUDs.
+    for (const [slot, player] of race.players.entries()) {
+      const context = playerMapContexts[slot];
+      context.clearRect(0,0,w,h);
+      context.drawImage(c.canvas,0,0);
+      context.beginPath();
+      context.arc(...to(player.x,player.z),13,0,Math.PI*2);
+      context.strokeStyle = '#fff';
+      context.lineWidth = 2;
+      context.stroke();
     }
   }
 }
@@ -1310,7 +1770,28 @@ function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.max(0, Math.min((now - lastFrame) / 1000, 0.1));
   lastFrame = now;
+  if (splitMode() && race?.state === 'ready') syncDuoLobby();
   if (!debug.freeze && !paused) {
+    if (splitMode()) {
+      const remotes = Array.from({length: activeCount()}, (_, slot) => duoRemote(slot, now));
+      const safe = lobby.sameParticipants(duoSlots()) &&
+        remotes.every((remote, i) => remote.live && duoMotionReady(i, now));
+      if (!safe && !['ready', 'results'].includes(race.state) && now > duoSignalGraceUntil) {
+        pause('A wheel signal was lost. Reconnect and level every original phone.');
+      } else if (safe) {
+        const inputs = remotes.map((remote, i) => {
+          const item = duoItemPulses[i] || (remote.item && !lastDuoItems[i]);
+          lastDuoItems[i] = remote.item;
+          duoItemPulses[i] = false;
+          return { gas: remote.gas, brake: remote.brake, drift: remote.drift,
+            steer: remote.steer, item };
+        });
+        race.update(dt, inputs);
+      }
+      audio.update(race);
+      $('wheel-status').textContent = remotes.map((remote, i) =>
+        `P${i + 1}: ${splitRemoteStatus(i, remote)}`).join(' · ');
+    } else {
     const remote = wheel.read(now),
       keyboard =
         keys.has("KeyZ") ||
@@ -1345,6 +1826,7 @@ function frame(now) {
     $("wheel-status").textContent = usingPhone
       ? remote.status + (wheel.invert ? " · inverted" : "")
       : "Z gas · X brake · Shift drift · Space item";
+    }
   }
   draw(dt || 1 / 60, now);
 }
@@ -1429,6 +1911,9 @@ const debug = {
       calls: renderer.info.render.calls,
       triangles: renderer.info.render.triangles,
     };
+  },
+  get graphics() {
+    return { mode, quality: qualityName, gpu, pixelRatio: renderer.getPixelRatio(), ao: ambientOcclusion.enabled, bloom: bloom.enabled, shadows: renderer.shadowMap.enabled, samples: composer.renderTarget1.samples };
   },
 };
 if (new URLSearchParams(location.search).get("evidence") === "1") {
@@ -1528,8 +2013,7 @@ syncPickupPools();
 audio.prepare();
 requestAnimationFrame(frame);
 window.addEventListener("resize", () => {
-  renderer.setSize(innerWidth, innerHeight);
-  composer.setSize(innerWidth, innerHeight);
+  applyGraphics();
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
 });
@@ -1540,6 +2024,7 @@ function toggleFullscreen() {
 }
 $("fullscreen").addEventListener("click", toggleFullscreen);
 window.addEventListener("keydown", (e) => {
+  if (e.target.closest?.('#graphics-panel')) return;
   if (e.repeat) return;
   if (e.code === "KeyF") toggleFullscreen();
   if (e.code === "KeyC") document.body.classList.toggle("capture");

@@ -21,6 +21,7 @@ const path = require('path');
 const QRCode = require('qrcode');
 const { Server } = require('socket.io');
 const { ensureCert, localAddresses } = require('./scripts/gen-cert');
+const { PhoneSlots } = require('./phone-slots');
 
 const PORT = Number(process.env.PORT) || 8443;
 const FORCE_HTTP = process.env.HTTP === '1';
@@ -127,46 +128,36 @@ function countOf(role) {
  * protocol migration.
  */
 const MAX_PLAYERS = 4;
-const slots = new Array(MAX_PLAYERS).fill(null);   // index → socket.id
+const slots = new PhoneSlots(MAX_PLAYERS);
 
-function assignSlot(socketId) {
-  const free = slots.indexOf(null);
-  if (free === -1) return -1;
-  slots[free] = socketId;
-  return free;
-}
-
-function releaseSlot(socketId) {
-  const i = slots.indexOf(socketId);
-  if (i !== -1) slots[i] = null;
-}
-
-const slotOf = (socketId) => slots.indexOf(socketId);
+const slotOf = (socketId) => slots.slotOf(socketId);
 
 function broadcastPresence() {
   io.emit('presence', {
     game: countOf('game'),
     controller: countOf('controller'),
-    slots: slots.map((id, i) => ({ slot: i, occupied: id !== null })),
+    slots: slots.presence(),
   });
 }
 
 io.on('connection', (socket) => {
-  socket.on('register', (role) => {
+  socket.on('register', (registration) => {
+    const role = typeof registration === 'string' ? registration : registration?.role;
     if (role !== 'game' && role !== 'controller') return;
-    roles.set(socket.id, role);
-    socket.join(role);
-
+    if (roles.has(socket.id)) return;
     if (role === 'controller') {
-      const slot = assignSlot(socket.id);
+      const slot = slots.assign(socket.id, registration?.identity);
       if (slot === -1) {
-        socket.emit('slot-denied', { reason: 'all player slots full', max: MAX_PLAYERS });
-        console.log(`[io] controller rejected — ${MAX_PLAYERS} slots full (${socket.id})`);
+        socket.emit('slot-denied', { reason: 'all player slots reserved', max: MAX_PLAYERS });
         return;
       }
       socket.emit('slot', { slot });
       console.log(`[io] controller connected as player ${slot + 1} (${socket.id})`);
-    } else {
+    }
+    roles.set(socket.id, role);
+    socket.join(role);
+
+    if (role === 'game') {
       console.log(`[io] game connected (${socket.id})`);
     }
     broadcastPresence();
@@ -187,16 +178,19 @@ io.on('connection', (socket) => {
   // connects, commands work, and the blade simply never moves. The payload is
   // ~100 bytes at 60Hz; the rate cap on the sender is the real backpressure.
   socket.on('orientation', (data) => {
-    socket.to('game').emit('orientation', { ...data, slot: slotOf(socket.id) });
+    if (roles.get(socket.id) === 'controller' && slotOf(socket.id) >= 0)
+      socket.to('game').emit('orientation', { ...data, slot: slotOf(socket.id) });
   });
 
   socket.on('motion', (data) => {
-    socket.to('game').emit('motion', { ...data, slot: slotOf(socket.id) });
+    if (roles.get(socket.id) === 'controller' && slotOf(socket.id) >= 0)
+      socket.to('game').emit('motion', { ...data, slot: slotOf(socket.id) });
   });
 
   // Phone → PC control actions: calibrate, start, pause, sensitivity nudges.
   socket.on('command', (data) => {
-    socket.to('game').emit('command', { ...data, slot: slotOf(socket.id) });
+    if (roles.get(socket.id) === 'controller' && slotOf(socket.id) >= 0)
+      socket.to('game').emit('command', { ...data, slot: slotOf(socket.id) });
   });
 
   // PC → phone feedback: hits (haptics), score, game state.
@@ -207,8 +201,10 @@ io.on('connection', (socket) => {
   // before slots existed — every existing single-player game's feedback
   // calls omit it, so this is purely additive.
   socket.on('feedback', (data) => {
-    if (typeof data.slot === 'number' && slots[data.slot]) {
-      io.to(slots[data.slot]).emit('feedback', data);
+    if (roles.get(socket.id) !== 'game') return;
+    if (typeof data.slot === 'number') {
+      const target = slots.socketAt(data.slot);
+      if (target) io.to(target).emit('feedback', data);
     } else {
       socket.to('controller').emit('feedback', data);
     }
@@ -217,7 +213,7 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     const role = roles.get(socket.id);
     roles.delete(socket.id);
-    releaseSlot(socket.id);
+    slots.release(socket.id);
     if (role) console.log(`[io] ${role} disconnected (${socket.id})`);
     broadcastPresence();
   });

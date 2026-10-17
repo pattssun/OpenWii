@@ -1,6 +1,9 @@
 * {
   box-sizing: border-box;
 }
+.keyboard-test-option { display:flex; align-items:center; gap:8px; margin:12px 0; font:600 14px/1.4 system-ui; color:white; }
+.keyboard-test-option input { width:18px; height:18px; accent-color:#5eaaff; }
+#keyboard-test-help { margin:6px 0 12px; max-width:650px; color:#d5e9ff; font:500 13px/1.4 system-ui; }
 html,
 body {
   margin: 0;
@@ -74,6 +77,13 @@ a:focus-visible {
   font-size: 10px;
   letter-spacing: 1px;
 }
+#graphics-panel { position: relative; letter-spacing: normal; }
+#graphics-panel summary { cursor: pointer; white-space: nowrap; padding: 10px 13px; border-radius: 20px; background: #142b52dd; border: 1px solid #93b7d64d; }
+.graphics-body { position: absolute; top: 42px; right: 0; width: min(360px, 85vw); padding: 18px; border-radius: 12px; background: #0a1635f5; border: 1px solid #93b7d64d; font-size: 12px; font-weight: 400; line-height: 1.5; text-shadow: none; box-shadow: 0 8px 25px #0008; }
+.graphics-body label { display: block; font-weight: 700; }
+.graphics-body select { width: 100%; padding: 8px; margin-top: 6px; background: #142b52; color: white; border: 1px solid #93b7d6; border-radius: 5px; }
+.graphics-body p { overflow-wrap: anywhere; margin: 12px 0 0; }
+#graphics-advice { color: #bfe5ff; }
 #intro {
   position: absolute;
   inset: 0 auto 0 0;
@@ -143,6 +153,65 @@ h1:after {
   flex-wrap: wrap;
   max-width: 490px;
 }
+#mode-options { display:flex; gap:8px; margin:0 0 18px; }
+#mode-options button { background:#1e3659; color:#d7e5fa; border:2px solid #6893ba; border-radius:7px; padding:10px 18px; font-weight:900; letter-spacing:1px; }
+#mode-options button[aria-pressed="true"] { background:#f8c836; color:#17243d; border-color:#fff1a5; }
+.duo #intro { width:78%; max-width:1050px; padding-top:78px; overflow:auto; background:linear-gradient(90deg,#0a1635fa,#0a183bef 80%,transparent); }
+.duo #intro h1 { font-size:clamp(52px,5vw,80px); }
+.duo #characters,.duo #chosen,.duo #start,.duo #menu-hint,.duo #track-label { display:none; }
+#duo-lobby { max-width:760px; }
+#duo-lobby p { color:#d7e5fa; font-size:14px; line-height:1.5; }
+.duo-choices { display:flex; gap:16px; margin:18px 0; }
+.duo-choice { display:flex; flex-direction:column; gap:8px; width:200px; min-height:215px; padding:16px; background:#10294de8; border:3px solid; border-radius:12px; text-align:center; }
+.p1 { border-color:#ff5267; }
+.p2 { border-color:#5eaaff; }
+.p3 { border-color:#63d978; }
+.p4 { border-color:#ffe067; }
+.duo-choice[hidden],.duo-player[hidden] { display:none; }
+.duo-choice strong { font-size:13px; letter-spacing:2px; }
+.duo-choice img { height:95px; object-fit:contain; }
+.duo-choice b { font-size:18px; }
+.duo-choice small { color:#ffdb75; line-height:1.35; }
+.duo #lap-options { margin-top:10px; }
+#duo-hud { position:absolute; inset:0; pointer-events:none; display:flex; z-index:1; }
+.duo-player { width:50%; height:100%; border:4px solid; padding:72px 20px 20px; position:relative; text-shadow:0 2px 6px #000; font-family:KartMessage,Arial,sans-serif; font-weight:normal; }
+.duo-player.p1 { border-color:#ff5267; }
+.duo-player.p2 { border-color:#5eaaff; }
+.duo-player.p3 { border-color:#63d978; }
+.duo-player.p4 { border-color:#ffe067; }
+.duo-player header { display:flex; gap:12px; align-items:center; font-size:clamp(14px,1.8vw,26px); font-weight:1000; letter-spacing:1px; }
+.duo-player.p1 header { color:#ff5267; }
+.duo-player.p2 header { color:#5eaaff; }
+.duo-player.p3 header { color:#63d978; }
+.duo-player.p4 header { color:#ffe067; }
+.duo-player header span { color:white; }
+.duo-rank { position:absolute; right:20px; top:78px; font-size:clamp(30px,4vw,60px); font-weight:1000; }
+.duo-info { position:absolute; bottom:24px; left:20px; display:flex; gap:20px; flex-wrap:wrap; font-size:clamp(12px,1.4vw,21px); font-weight:900; }
+.duo-item { position:absolute; left:20px; top:112px; background:#0c1c37d9; border:2px solid #ffe181; padding:10px; border-radius:9px; font-weight:900; min-width:100px; text-align:center; }
+.duo-finish { position:absolute; top:42%; left:0; width:100%; text-align:center; font-size:clamp(36px,5vw,70px); font-weight:1000; color:#ffdb51; }
+.duo #speed-lines,.duo #hit-flash { display:none; }
+.duo #item-frame,.duo #race-brand,.duo #lap-panel,.duo #position,.duo #speed,.duo #drift-meter,.duo #notice { display:none !important; }
+@media(max-width:800px) { .duo #intro {width:100%;padding:82px 20px 30px;} .duo-choices {gap:8px;} .duo-choice {width:50%;} .duo-player {padding-left:8px;padding-right:8px;} .duo-info {gap:7px;left:8px;} .duo-item {left:8px;} }
+.quad #intro { width:min(100%,1200px); max-width:none; }
+#quad-test-controls {position:relative;z-index:20;display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:10px 0;padding:6px 10px;background:#0a1635ed;border:1px solid #a9c6e5;border-radius:8px;font:12px KartMessage,Arial,sans-serif;}
+.racing #quad-test-controls {position:fixed;bottom:52px;left:50%;transform:translateX(-50%);margin:0;flex-wrap:nowrap;white-space:nowrap;}
+#quad-test-controls[hidden] {display:none;}
+#quad-test-controls button {font:inherit;padding:5px 8px;border:1px solid #a9c6e5;background:#172a46;color:white;border-radius:4px;cursor:pointer;}
+#quad-test-controls button[aria-pressed="true"] {background:#ffe067;color:#17253e;}
+.racing #quad-ready-all {display:none;}
+.quad #duo-lobby { max-width:1060px; }
+.quad .duo-choices { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
+.quad .duo-choice { width:auto; min-width:0; min-height:175px; padding:10px; gap:5px; }
+.quad .duo-choice img { height:64px; }
+.quad .duo-choice b { font-size:16px; }
+.quad #duo-hud { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); grid-template-rows:repeat(2,minmax(0,1fr)); }
+.quad .duo-player { width:100%; height:100%; padding:52px 12px 12px; }
+.quad .duo-player header { font-size:clamp(14px,1.3vw,22px); width:max-content; max-width:100%; padding:4px 6px; border-radius:5px; background:#0a1635b8; }
+.quad .duo-item { top:85px; left:12px; padding:6px; min-width:72px; font-size:clamp(10px,1vw,16px); }
+.quad .duo-info { bottom:20px; left:12px; gap:10px; max-width:calc(100% - 105px); }
+.quad .duo-rank { bottom:28px; right:clamp(42px,3.5vw,68px); width:clamp(60px,5vw,90px); height:clamp(65px,9vh,95px); }
+.quad .duo-rank sup { font-size:clamp(20px,1.8vw,30px); margin:0 0 10px -7px; }
+.quad .duo-finish > .race-lettering { height:clamp(50px,8vh,100px); }
 .character {
   width: 50px;
   height: 56px;
@@ -889,6 +958,7 @@ h2 {
 body {font-family:KartMessage,Arial,sans-serif;font-weight:normal;}
 button {font-weight:normal!important;}
 .racing #topline,.racing #drift-meter,.racing #notice[data-essential="false"] {display:none;}
+.duo.racing #topline {display:flex;}
 #item-frame {width:10.5vw;height:10.5vw;left:7.3vw;top:8vh;border-width:.5vw;box-shadow:0 0 0 .18vw #303b42,0 0 0 .35vw #d5d8cb66,inset 0 0 0 .25vw #222a31,inset 0 .2vw .8vw #ffffff77;}
 #lap-panel {left:4.1vw;bottom:4.3vh;gap:.65vw;font-size:2.5vw;transform:skew(-10deg);align-items:center;}
 .race-numerals {display:block;font-family:KartCounter,Arial,sans-serif;font-weight:normal;line-height:1;filter:none;text-shadow:.14vw .2vw .1vw #111;}
@@ -956,4 +1026,53 @@ button {font-weight:normal!important;}
 #lap-options>span {font-size:.9vw;margin-right:auto;}
 #lap-options button {font:inherit;font-size:1.15vw;padding:.5vw 1.1vw;border:2px solid #d7ecff;border-radius:4px;color:#203e61;background:#d7ecffb8;cursor:pointer;}
 #lap-options button[aria-pressed="true"] {background:linear-gradient(#fff67e,#ffd331);border-color:#fff6a0;box-shadow:0 2px 0 #bd931a;}
+.duo #intro .eyebrow,.duo #intro .stadium-name,.duo #intro .intro-copy,
+.duo #intro .controls,.duo #intro .controls b,.duo #lap-options {color:#eff7ff;text-shadow:0 2px 4px #000;}
+.duo #lap-options>span {font-size:13px;font-weight:900;letter-spacing:1px;}
+.duo-player header {max-width:100%;white-space:nowrap;font-weight:normal;}
+.duo-player header span {overflow:hidden;text-overflow:ellipsis;}
+.duo-rank { top:auto;bottom:20px;display:flex;align-items:flex-end;width:clamp(80px,6vw,120px);height:clamp(85px,12vh,130px);font-weight:normal;color:#ffe9a0;text-shadow:none; }
+.duo-rank > .race-lettering { width:78%;height:100%; }
+.duo-rank sup { font-family:KartMessage,Arial,sans-serif;font-weight:normal;font-style:italic;font-size:clamp(22px,2vw,38px);margin:0 0 1.2vh -.8vw;letter-spacing:-.1vw;-webkit-text-stroke:.05vw #fff4d5;text-shadow:.15vw .2vw #2d2923; }
+.duo-info { max-width:calc(100% - 145px);align-items:flex-end;gap:clamp(10px,1.1vw,20px);font-weight:normal; }
+.duo-counter { display:flex;align-items:center;gap:8px; }
+.duo-counter > span { font-size:clamp(10px,.9vw,16px);font-weight:normal; }
+.duo-counter .race-numerals { font-size:clamp(19px,1.8vw,32px);color:white; }
+.duo-coins .race-numerals { color:#ffcf24; }
+.duo-item { font-family:KartMessage,Arial,sans-serif;font-weight:normal; }
+/* A compact map belongs to each viewport; keep the solo map out of split HUDs. */
+.duo #minimap {display:none;}
+.player-minimap {position:absolute;right:12px;top:50%;transform:translateY(-50%);width:clamp(100px,10vw,145px);height:auto;aspect-ratio:25/22;opacity:.9;background:#09162666;border-radius:14px;pointer-events:none;}
+/* Reuse the solo reel and native item art, with one isolated reel per human. */
+.duo .duo-item {display:grid;place-items:center;min-width:0;width:clamp(62px,6vw,92px);height:clamp(62px,6vw,92px);padding:0;border:3px solid #a4aaa7;border-radius:50%;overflow:hidden;background:radial-gradient(circle at 38% 25%,#6b747990,#151c23e6 76%);box-shadow:0 0 0 2px #303b42,inset 0 0 0 2px #222a31;transition:opacity .14s;}
+.duo .duo-item.empty {opacity:0;}
+.quad .duo-item {top:94px;}
+.split-item-icon {width:82%;height:82%;position:relative;overflow:hidden;border-radius:40%;filter:drop-shadow(0 3px 2px #0008);}
+.split-item-icon>img,.split-item-icon>svg {display:block;width:100%;height:100%;object-fit:contain;}
+.split-item-icon.rolling {filter:drop-shadow(0 3px 2px #0008) blur(.35px);}
+.duo-item:has(.rolling) {border-color:#f3f6e9;box-shadow:0 0 0 2px #303b42,inset 0 0 12px #eef9ff99;}
+#lap-options {flex-wrap:wrap;}
+.duo #lap-options {width:auto;max-width:100%;}
+.lap-stepper {display:inline-flex;align-items:center;gap:6px;}
+#lap-count {width:3.5em;padding:5px;text-align:center;font:inherit;font-size:clamp(16px,1.3vw,23px);color:#153250;background:#f2f8ff;border:2px solid #d7ecff;border-radius:4px;}
+.lap-stepper>span {font-size:11px;white-space:nowrap;}
+.duo-finish > .race-lettering { width:78%;height:clamp(80px,13vh,150px); }
+.quad #results { place-items:center; }
+.quad .results-panel { width:min(80vw,980px); margin:0; }
+.quad #result-summary { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px 16px; font-size:clamp(12px,1.1vw,17px); }
+.quad #result-summary span { padding:3px 7px; background:#17253ec9; text-shadow:0 2px 3px #000; }
 .driver-confirmed #lap-options button[aria-pressed="true"],#lap-options button:focus-visible {outline:3px solid #fff;outline-offset:2px;}
+.duo #intro .controls { display:none; }
+@media (max-height:800px) {
+  .duo #intro { padding-top:70px; padding-bottom:80px; }
+  .duo #intro > .eyebrow { display:none; }
+  .duo #intro h1 { margin:0 0 8px; }
+  .duo #intro h1 img { width:min(36vw,460px); }
+  .duo #intro .intro-copy { margin:8px 0; }
+  .duo #mode-options { margin-bottom:8px; }
+  .duo .keyboard-test-option { margin:8px 0; }
+  .duo #duo-instructions { margin:8px 0; }
+  .duo-choices { margin:10px 0; }
+  .duo-choice { min-height:180px; padding:10px; gap:5px; }
+  .duo-choice img { height:70px; }
+}

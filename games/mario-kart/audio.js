@@ -17,6 +17,7 @@ export class KartAudio {
     this.music = null;
     this.musicGain = null;
     this.stopped = false;
+    this.sharedFinishRace = null;
     this.beat = 0;
     this.nextBeat = 0;
     for (const [i, type] of EVENT_TYPES.entries())
@@ -130,6 +131,11 @@ export class KartAudio {
     else this.engine.tone({freq:kind==='cursor'?880:660,dur:.055,gain:.06,type:'sine'});
   }
   event(e, race) {
+    if (e.type === 'finish' && race?.humanCount > 1) {
+      if (race.state !== 'finishing' || this.sharedFinishRace === race) return;
+      this.sharedFinishRace = race;
+      e = { ...e, racer: 0 };
+    }
     if (race && this.original.event(e, race)) return;
     if (e.racer !== 0) return;
     if (e.type === 'finish') this.fallbackFinishUntil = (this.engine.ctx?.currentTime || 0) + .6;

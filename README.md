@@ -8,7 +8,7 @@ vary by game.
 
 ## Quick start
 
-Requires **Node.js 22+**, **OpenSSL**, a computer browser with WebGL 2, and a
+Requires **Node.js 22+**, a computer browser with WebGL 2, and a
 motion-capable phone browser on the **same Wi-Fi**.
 
 ```bash
@@ -32,7 +32,7 @@ play.
 
 | Game | How to play | Players |
 | --- | --- | --- |
-| 🏎️ **[Mario Kart](games/mario-kart/README.md)** | Hold your phone sideways to steer, drift, boost and use items. The linked guide covers controls and included assets. | 1 human + 7 CPU racers |
+| 🏎️ **[Mario Kart](games/mario-kart/README.md)** | Hold your phone sideways to steer, drift, boost and use items. The linked guide covers controls and included assets. | 1, 2 or 4 humans; CPUs fill 8 racers |
 | 🍉 **[Fruit Ninja](games/fruit-ninja/)** | Swing to slice fruit, dodge bombs and build combos. | Up to 4 |
 | 👾 **[Alien Attack](games/alien-attack/)** | Tilt to fly and press A to fire. | 1 |
 | 🎯 **[Shooting Range](games/shooting-range/)** | Point and press A to hit targets against the clock. | 1 |
@@ -60,8 +60,7 @@ stream so it never feels laggy.
 
 - **Cannot connect:** check both devices are on the same Wi-Fi, allow Node.js
   through the firewall, and avoid guest networks that isolate devices.
-- **Buttons work but motion does not:** check HTTPS and motion permissions. If
-  the terminal reports an HTTP fallback, install OpenSSL and restart.
+- **Buttons work but motion does not:** check HTTPS and motion permissions.
 - **Black screen:** enable WebGL 2 / hardware acceleration in the computer browser.
 - **No sound:** click the game to unlock audio and check its mute control.
 

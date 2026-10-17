@@ -1,0 +1,64 @@
+/** One simulated phone + actual keyboard events through the one-phone test UI. */
+import { chromium } from 'playwright';
+import assert from 'node:assert/strict';
+import { mkdir } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+
+const browser = await chromium.launch({channel:'chrome',headless:true});
+const base=process.env.KART_URL||'https://localhost:8443';
+const out=new URL('./evidence/keyboard-two-player/',import.meta.url);
+await mkdir(out,{recursive:true});
+try {
+  const page=await browser.newPage({ignoreHTTPSErrors:true,viewport:{width:1280,height:720}});
+  const errors=[];
+  page.on('pageerror', e=>errors.push(e.message));
+  await page.goto(`${base}/games/mario-kart/?evidence=1`);
+  await page.waitForFunction(()=>window.__kart?.assets,null,{timeout:90000});
+  await page.click('[data-mode="duo"]');
+  assert.equal(await page.isChecked('#keyboard-test'),false);
+  await page.check('#keyboard-test');
+  await page.keyboard.press('Enter');
+  assert.equal(await page.evaluate(()=>__kart.race.state),'ready','Keyboard cannot start without P1 phone');
+  await page.evaluate(()=>{
+    window.__phone=io({transports:['websocket']});
+    __phone.on('connect',()=>__phone.emit('register',{role:'controller',identity:'simulated-phone-0-stable-local-test'}));
+    const quat=[.061628416716219346,.061628416716219346,-.7044160264027587,.7044160264027587];
+    window.__phoneTimer=setInterval(()=>__phone.emit('orientation',{quat}),16);
+    __phone.on('presence',p=>window.__presence=p);
+  });
+  await page.waitForFunction(()=>document.getElementById('duo-state-0').textContent==='Press 2 to ready',null,{timeout:20000});
+  await page.keyboard.press('KeyX');
+  const p1=await page.textContent('#duo-driver-0');
+  const p2=await page.textContent('#duo-driver-1');
+  await page.keyboard.press('ArrowRight');
+  assert.equal(await page.textContent('#duo-driver-0'),p1,'Keyboard does not change P1 driver');
+  assert.notEqual(await page.textContent('#duo-driver-1'),p2,'Keyboard selects P2 driver');
+  await page.keyboard.press('Enter');
+  await page.screenshot({path:fileURLToPath(new URL('lobby.png',out))});
+  await page.evaluate(()=>__phone.emit('command',{type:'button',button:'2',pressed:true}));
+  await page.waitForFunction(()=>__kart.race.state==='countdown',null,{timeout:20000});
+  await page.evaluate(()=>__phone.emit('command',{type:'button-up',button:'2'}));
+  await page.waitForFunction(()=>__kart.race.state==='racing',null,{timeout:20000});
+  assert.equal(await page.evaluate(()=>__presence.slots.filter(s=>s.occupied).length),1,'Test does not consume a phone slot');
+  await page.keyboard.down('KeyZ');
+  await page.waitForFunction(()=>__kart.race.players[1].speed>8,null,{timeout:10000});
+  assert.equal(await page.evaluate(()=>!!__kart.race.players[0].lastInput.gas),false,'Keyboard gas does not reach P1');
+  await page.keyboard.up('KeyZ');
+  await page.keyboard.down('ArrowLeft');
+  await page.waitForFunction(()=>__kart.race.players[1].lastInput.steer<-.5);
+  await page.keyboard.up('ArrowLeft');
+  await page.evaluate(()=>{__kart.race.players[0].item='mushroom';__kart.race.players[1].item='mushroom';});
+  await page.keyboard.press('Space');
+  await page.waitForFunction(()=>__kart.race.players[1].item===null);
+  assert.equal(await page.evaluate(()=>__kart.race.players[0].item),'mushroom');
+  await page.screenshot({path:fileURLToPath(new URL('race.png',out))});
+  await page.keyboard.press('Escape');
+  assert.equal(await page.evaluate(()=>__kart.paused),true);
+  await page.waitForFunction(()=>__kart.wheel.armed && __kart.wheel.read(performance.now()).live);
+  await page.keyboard.press('Enter');
+  assert.equal(await page.evaluate(()=>__kart.paused),false);
+  await page.evaluate(()=>{clearInterval(__phoneTimer);__phone.disconnect();});
+  await page.waitForFunction(()=>__kart.paused,null,{timeout:10000});
+  assert.deepEqual(errors,[]);
+  console.log(JSON.stringify({passed:true,checks:['explicit test opt-in','P1 phone required','independent keyboard P2 selection/steering/gas/item','one actual phone slot','pause/resume and phone disconnect safety'],graphics:await page.evaluate(()=>__kart.graphics)},null,2));
+} finally { await browser.close(); }

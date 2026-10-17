@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {SampledKartAudio} from './sample-audio.js';
+import {KartAudio} from './audio.js';
 function scene(){
  const audio=new SampledKartAudio({ctx:{currentTime:10}}),played=[];
  audio.ready=true;audio.buffers.set('hit-green',{});audio.buffers.set('hit-red',{});audio.buffers.set('shellConfirm',{});
@@ -50,4 +51,74 @@ test('results follow the short finish sample, independently of the longer placem
  audio.engine.ctx.currentTime=11.75;assert.equal(audio.resultsReady,true);
  assert.ok(audio.finishUntil>audio.engine.ctx.currentTime,'Longer fanfare still plays');
  assert.deepEqual(played.map(p=>p.key),['finish','finishWin']);
+});
+
+test('multiplayer sample finish waits for the last human before stopping race audio',()=>{
+ for(const humanCount of [2,4]){
+  const {audio,played,race}=scene(),music={key:'race'},ended=[];
+  race.humanCount=humanCount;race.state='racing';race.standings=race.racers;
+  while(race.racers.length<humanCount)race.racers.push({id:race.racers.length,character:{id:'mario'}});
+  audio.buffers.set('finish',{duration:1.75});audio.buffers.set('finishWin',{duration:7});
+  audio.nodes.add(music);audio.loops.set('music',music);
+  audio.end=node=>ended.push(node);
+  audio.event({type:'finish',racer:0},race);
+  assert.deepEqual(played,[]);
+  assert.equal(audio.finishAt,0);
+  assert.equal(audio.loops.get('music'),music);
+  assert.deepEqual(ended,[]);
+  race.state='finishing';
+  audio.event({type:'finish',racer:humanCount-1},race);
+  assert.deepEqual(played.map(cue=>cue.key),['finish','finishWin']);
+  assert.equal(audio.finishAt,10);
+  assert.equal(audio.loops.size,0);
+  assert.deepEqual(ended,[music]);
+ }
+});
+
+test('synth fallback defers the shared finish cue for two and four humans',()=>{
+ for(const humanCount of [2,4]){
+  const audio=new KartAudio(),played=[];
+  audio.original.event=()=>false;
+  audio.engine.ctx={currentTime:10};
+  audio.engine.play=(key,event)=>played.push({key,racer:event.racer});
+  const race={humanCount,state:'racing'};
+  audio.event({type:'finish',racer:0},race);
+  assert.deepEqual(played,[]);
+  assert.equal(audio.fallbackFinishUntil,undefined);
+  race.state='finishing';
+  audio.event({type:'finish',racer:humanCount-1},race);
+  assert.deepEqual(played,[{key:'mk-finish',racer:0}]);
+  assert.equal(audio.fallbackFinishUntil,10.6);
+ }
+});
+
+test('same-step multiplayer finishes play one sampled cue per race',()=>{
+ for(const humanCount of [2,4]){
+  const {audio,played,race}=scene(),music={key:'race'},ended=[];
+  race.humanCount=humanCount;race.state='finishing';
+  while(race.racers.length<humanCount)race.racers.push({id:race.racers.length,character:{id:'mario'}});
+  race.standings=race.racers;
+  audio.buffers.set('finish',{duration:1.75});audio.buffers.set('finishWin',{duration:7});
+  audio.nodes.add(music);audio.loops.set('music',music);audio.end=node=>ended.push(node);
+  for(let racer=0;racer<humanCount;racer++)audio.event({type:'finish',racer},race);
+  assert.deepEqual(played.map(cue=>cue.key),['finish','finishWin']);
+  assert.deepEqual(ended,[music]);
+  const nextRace={...race};
+  audio.event({type:'finish',racer:humanCount-1},nextRace);
+  assert.deepEqual(played.map(cue=>cue.key),['finish','finishWin','finish','finishWin']);
+ }
+});
+
+test('same-step multiplayer finishes play one synth cue per race',()=>{
+ for(const humanCount of [2,4]){
+  const audio=new KartAudio(),played=[];
+  audio.original.event=()=>false;
+  audio.engine.ctx={currentTime:10};
+  audio.engine.play=(key,event)=>played.push({key,racer:event.racer});
+  const race={humanCount,state:'finishing'};
+  for(let racer=0;racer<humanCount;racer++)audio.event({type:'finish',racer},race);
+  assert.deepEqual(played,[{key:'mk-finish',racer:0}]);
+  audio.event({type:'finish',racer:humanCount-1},{...race});
+  assert.deepEqual(played,[{key:'mk-finish',racer:0},{key:'mk-finish',racer:0}]);
+ }
 });

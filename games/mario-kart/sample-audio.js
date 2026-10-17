@@ -5,7 +5,7 @@ export class SampledKartAudio {
   constructor(engine) {
     this.engine=engine;this.buffers=new Map();this.loops=new Map();this.nodes=new Set();
     this.projectiles=new Map();this.log=[];this.failures=[];this.ready=false;this.race=null;this.voiceAt=0;
-    this.musicKey=null;this.musicEpoch=0;this.musicOrigins={};this.finalAt=0;this.finishAt=0;this.finishUntil=0;this.finishCueUntil=0;this.impactUntil=0;this.lead=0;
+    this.musicKey=null;this.musicEpoch=0;this.musicOrigins={};this.finalAt=0;this.finishAt=0;this.finishUntil=0;this.finishCueUntil=0;this.impactUntil=0;this.lead=0;this.sharedFinishRace=null;
   }
   async prepare() {
     if(this.pending)return this.pending;
@@ -67,7 +67,7 @@ export class SampledKartAudio {
     for(const node of this.nodes)if(node!==menu&&node.bus!=='ui')this.end(node,.015);
     this.loops.clear();this.projectiles.clear();
     if(menu)this.loops.set('music',menu);else{this.musicKey=null;this.musicOrigins={};}
-    this.resultsPresented=false;this.confirmAt=0;this.race=race;this.finalAt=0;this.finishAt=0;this.finishUntil=0;this.finishCueUntil=0;this.impactUntil=0;this.voiceAt=0;this.lead=0;
+    this.resultsPresented=false;this.confirmAt=0;this.race=race;this.finalAt=0;this.finishAt=0;this.finishUntil=0;this.finishCueUntil=0;this.impactUntil=0;this.voiceAt=0;this.lead=0;this.sharedFinishRace=null;
   }
   get resultsReady(){return !this.ready||this.engine.ctx.state!=='running'||this.engine.ctx.currentTime>=this.finishCueUntil;}
   presentResults(race,duration){
@@ -104,8 +104,13 @@ export class SampledKartAudio {
     this.play(keys[(this.voiceIndex=(this.voiceIndex||0)+1)%keys.length],{bus:'voice'});
   }
   event(e,race){
+    if(e.type==='finish'&&race.humanCount>1){
+      if(race.state!=='finishing'||this.sharedFinishRace===race)return true;
+      e={...e,racer:0};
+    }
     if(!this.ready)return false;
     if(this.race!==race)this.reset(race);
+    if(e.type==='finish'&&race.humanCount>1)this.sharedFinishRace=race;
     const r=race.racers[e.racer];if(!r)return true;
     if(e.type==='hit') {
       const p=race.player,dx=r.x-p.x,dz=r.z-p.z,distance=Math.hypot(dx,r.y-p.y,dz);
