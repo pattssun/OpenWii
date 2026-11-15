@@ -159,6 +159,9 @@ socket.on('feedback', (msg) => {
     buzz(8);
   } else if (msg.type === 'launch') {
     speakerTalk(120);
+  } else if (msg.type === 'rumble' && (Array.isArray(msg.pattern) || Number.isFinite(msg.pattern))) {
+    // Generic haptics: games send a vibration pattern (ms) for this player's phone.
+    buzz(msg.pattern);
   }
 });
 

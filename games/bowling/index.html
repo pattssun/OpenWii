@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bowling — OpenWii</title>
+<style>
+  * { box-sizing: border-box; }
+  :root { --p1: #ff6a3d; --p2: #3d9bff; --ink: #eaf2ff; --panel: #0b1426d9; --line: #ffffff26; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden; background: #070b16; color: var(--ink);
+    font: 600 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    user-select: none; cursor: none;
+  }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  [hidden] { display: none !important; }
+
+  /* ── Scoreboard ─────────────────────────────────────────────────────── */
+  #board { position: absolute; left: 50%; top: 14px; transform: translateX(-50%);
+    display: grid; gap: 6px; padding: 10px 12px; border-radius: 14px;
+    background: var(--panel); border: 1px solid var(--line); backdrop-filter: blur(8px); }
+  .row { display: grid; grid-template-columns: 74px repeat(10, 58px) 66px; gap: 4px; align-items: stretch; }
+  .row.active .who { box-shadow: 0 0 0 2px var(--c), 0 0 18px var(--c); }
+  .who { display: flex; align-items: center; gap: 8px; padding: 0 8px; border-radius: 9px;
+    background: #ffffff10; color: #fff; font-weight: 800; letter-spacing: .04em; font-size: 13px; }
+  .who i { width: 10px; height: 10px; border-radius: 50%; background: var(--c); }
+  .frame { border-radius: 8px; background: #ffffff0d; border: 1px solid #ffffff14; min-height: 44px;
+    display: grid; grid-template-rows: 18px 1fr; text-align: center; }
+  .frame.now { border-color: var(--c); background: color-mix(in srgb, var(--c) 18%, transparent); }
+  .marks { display: flex; justify-content: flex-end; gap: 1px; padding: 1px 4px 0; font-size: 12px; font-weight: 800; color: #cfe0ff; }
+  .marks span { min-width: 15px; text-align: center; border-left: 1px solid #ffffff26; }
+  .marks span:first-child { border-left: 0; }
+  .marks .x { color: #ffd54a; }
+  .total { align-self: center; font-size: 17px; font-weight: 800; }
+  .sum { display: grid; place-items: center; font-size: 22px; font-weight: 900; color: #fff;
+    border-radius: 9px; background: #ffffff14; }
+
+  /* ── Corner readouts ───────────────────────────────────────────────── */
+  #turn { position: absolute; left: 24px; bottom: 24px; padding: 12px 18px; border-radius: 14px;
+    background: var(--panel); border: 1px solid var(--line); min-width: 240px; }
+  #turn b { display: block; font-size: 22px; letter-spacing: .02em; color: var(--c); }
+  #turn small { color: #9db4dd; font-weight: 600; }
+  #hint { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%);
+    padding: 9px 16px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line);
+    font-size: 13px; color: #cfe0ff; white-space: nowrap; }
+  #links { position: absolute; right: 24px; bottom: 24px; display: grid; gap: 8px; }
+  .link { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-radius: 999px;
+    background: var(--panel); border: 1px solid var(--line); font-size: 13px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #5b6a86; }
+  .dot.on { background: #35d07f; }
+  .link .cal { color: #9db4dd; }
+  #meter { position: absolute; left: 50%; bottom: 74px; width: 280px; height: 12px; transform: translateX(-50%);
+    border-radius: 999px; background: #ffffff1c; overflow: hidden; border: 1px solid var(--line); opacity: 0; transition: opacity .15s; }
+  #meter.on { opacity: 1; }
+  #meter i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #35d07f, #ffd54a, #ff5a4d); }
+
+  #banner { position: absolute; left: 50%; top: 24%; transform: translate(-50%, 0) scale(.9);
+    font-size: clamp(44px, 9vw, 116px); font-weight: 900; letter-spacing: -.02em; color: #fff;
+    text-shadow: 0 6px 0 #0006, 0 0 40px var(--c, #ffd54a); opacity: 0; white-space: nowrap; pointer-events: none; }
+  #banner.show { animation: pop 1.7s ease-out forwards; }
+  @keyframes pop { 0% { opacity: 0; transform: translate(-50%, 18px) scale(.6); }
+    14% { opacity: 1; transform: translate(-50%, 0) scale(1.08); } 24% { transform: translate(-50%, 0) scale(1); }
+    78% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -22px) scale(1); } }
+
+  /* ── Lobby / calibration ───────────────────────────────────────────── */
+  .scrim { position: absolute; inset: 0; z-index: 5; display: grid; place-items: center;
+    background: radial-gradient(ellipse at 50% 35%, #172a52ee, #070b16f4 72%); }
+  .panel { width: min(880px, 92vw); text-align: center; }
+  .panel h1 { margin: 0 0 4px; font-size: clamp(40px, 6vw, 68px); font-weight: 900; letter-spacing: -.03em; }
+  .panel h1 em { font-style: normal; background: linear-gradient(120deg, #ffb347, #ff5a4d);
+    -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .panel p { margin: 0 auto 22px; color: #a9bddf; max-width: 560px; }
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 20px; }
+  .card { padding: 20px 20px 18px; border-radius: 18px; background: #ffffff0f; border: 2px solid #ffffff1c; text-align: left; transition: border-color .2s, background .2s; }
+  .card.ready { border-color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); }
+  .card h2 { margin: 0; display: flex; justify-content: space-between; align-items: center; font-size: 22px; color: var(--c); }
+  .card h2 span { font-size: 13px; color: #8da3cc; font-weight: 700; }
+  .card .state { margin: 10px 0 12px; font-size: 16px; min-height: 46px; color: #dbe7ff; }
+  .bar { height: 10px; border-radius: 999px; background: #ffffff1c; overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--c); transition: width .08s linear; }
+  .card .tick { margin-top: 10px; font-size: 14px; color: #8da3cc; }
+  .card.ready .tick { color: #35d07f; }
+  .cta { color: #cfe0ff; font-size: 15px; }
+  .cta b { color: #fff; }
+  #result { margin: 8px 0 18px; font-size: 24px; font-weight: 800; }
+  #final { display: grid; gap: 8px; max-width: 520px; margin: 0 auto 18px; }
+  #final div { display: flex; justify-content: space-between; padding: 12px 18px; border-radius: 12px; background: #ffffff10; font-size: 22px; font-weight: 800; }
+  #final .win { background: color-mix(in srgb, var(--c) 28%, transparent); }
+  #topbar { position: absolute; left: 20px; top: 16px; z-index: 6; font-size: 13px; }
+  #topbar a { color: #9db4dd; text-decoration: none; pointer-events: auto; cursor: pointer; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="topbar"><a href="/">← Games</a></div>
+<div id="board" hidden></div>
+<div id="turn" hidden><b id="turn-name">Player 1</b><small id="turn-detail">Frame 1 · first ball</small></div>
+<div id="meter"><i id="meter-fill"></i></div>
+<div id="hint" hidden></div>
+<div id="links"></div>
+<div id="banner"></div>
+
+<div id="lobby" class="scrim">
+  <div class="panel">
+    <h1>🎳 <em>Bowling</em></h1>
+    <p>Each player holds their phone out in front, pointing at the screen, and keeps it still until the bar fills.
+       Then it's hold <b>A</b>, swing your arm, and let go.</p>
+    <div class="cards" id="cards"></div>
+    <div class="cta" id="lobby-cta"></div>
+  </div>
+</div>
+
+<div id="over" class="scrim" hidden>
+  <div class="panel">
+    <h1><em>Game over</em></h1>
+    <div id="result"></div>
+    <div id="final"></div>
+    <div class="cta"><b>A</b> or <b>Enter</b> to bowl again · <b>B</b> back to games</div>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script type="module" src="game.js"></script>
+</body>
+</html>
