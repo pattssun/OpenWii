@@ -5,7 +5,7 @@ import { GameLink } from '../../core/net.js';
 import {
   LANE, Match, rack, scoreFrames, marks, totalScore, nextRoll,
 } from './logic.js';
-import { StanceCalibration, ThrowTracker } from './throw.js';
+import { StanceCalibration, ThrowTracker, readSample } from './throw.js';
 
 consumeLaunchSplash();
 
@@ -42,6 +42,49 @@ const sound = {
   spare: () => sfx(() => [523, 784, 1047].forEach((f, i) => audio.tone({ freq: f, dur: 0.24, gain: 0.18, delay: i * 0.1, type: 'triangle' }))),
   turn: () => sfx(() => audio.tone({ freq: 740, dur: 0.14, gain: 0.12 })),
 };
+
+// ── Debug log ──────────────────────────────────────────────────────────────
+// Open the game with ?debug=1 (or localStorage openwii.bowling.debug = '1') to
+// record what the phones send and what the ball does. Press L to save the log as
+// JSON; the same rows are in the console at the Verbose/Debug level.
+const DEBUG = new URLSearchParams(location.search).has('debug') || localStorage.getItem('openwii.bowling.debug') === '1';
+const dbg = {
+  rows: [],
+  t0: performance.now(),
+  add(kind, data = {}) {
+    if (!DEBUG) return;
+    const row = { t: Math.round(performance.now() - this.t0), kind, ...data };
+    this.rows.push(row);
+    if (this.rows.length > 40000) this.rows.shift();
+    console.debug('[bowling]', kind, JSON.stringify(data));
+  },
+  download() {
+    const blob = new Blob([JSON.stringify({ userAgent: navigator.userAgent, rows: this.rows }, null, 1)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `bowling-debug-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  },
+};
+const r2 = (v) => (Number.isFinite(v) ? +v.toFixed(2) : v);
+const lastSampleLog = [0, 0];
+/** One row per ~30ms per phone: raw sensor values plus what the game derived from them. */
+function logSample(pad, sample, t) {
+  if (!DEBUG || t - lastSampleLog[pad.slot] < 30) return;
+  lastSampleLog[pad.slot] = t;
+  const s = readSample(sample);
+  const m = sample.motion || {};
+  dbg.add('sample', {
+    slot: pad.slot, phase: ui.phase, calibrated: pad.calib.ready, held: pad.held,
+    alpha: r2(sample.alpha), beta: r2(sample.beta), gamma: r2(sample.gamma),
+    ax: r2(m.ax), ay: r2(m.ay), az: r2(m.az), rx: r2(m.rx), ry: r2(m.ry), rz: r2(m.rz),
+    grip: s.grip, heading: r2(s.heading), relHeading: pad.calib.ready ? r2(pad.calib.relative(s.heading)) : null,
+    pitch: r2(s.pitch), yawRight: r2(s.yawRight), swing: r2(s.swing), twist: r2(s.twist),
+    swept: r2(pad.tracker.swept), liveAimDeg: pad.calib.ready ? r2(pad.tracker.liveAim(sample)) : null,
+    calibProgress: pad.calib.ready ? 1 : r2(pad.calib.progress), calibStatus: pad.calib.ready ? 'ready' : pad.calib.status,
+  });
+}
 
 // ── Phones ─────────────────────────────────────────────────────────────────
 const pads = [0, 1].map((slot) => {
@@ -136,8 +179,13 @@ function confirm(pad) {
 
 function onSample(pad, sample) {
   const t = now();
+  logSample(pad, sample, t);
   if (!pad.calib.ready) {
-    if (pad.calib.update(sample, t)) { haptic(pad.slot, [20, 60, 20]); sound.ready(); }
+    if (pad.calib.update(sample, t)) {
+      haptic(pad.slot, [20, 60, 20]);
+      sound.ready();
+      dbg.add('calibrated', { slot: pad.slot, heading: r2(pad.calib.heading), grip: pad.calib.grip });
+    }
     return;
   }
   if (ui.phase !== 'play') return;
@@ -146,6 +194,7 @@ function onSample(pad, sample) {
   if (padOf(match.current) !== pad) return;
   const ev = pad.tracker.update(sample, t, pad.held);
   if (!ev) return;
+  dbg.add('tracker', { slot: pad.slot, ...ev });
   if (ev.type === 'grip') { ui.gripped = true; haptic(pad.slot, [12]); sound.grip(); }
   else if (ev.type === 'cancel') { ui.gripped = false; showHint('Swing your arm, then let go of A'); }
   else if (ev.type === 'throw') {
@@ -189,6 +238,7 @@ window.addEventListener('keydown', (e) => {
     if (ui.phase === 'over') { confirm(null); return; }
     if (canAct()) { ui.kb.held = true; ui.kb.since = now(); ui.gripped = true; sound.grip(); }
   }
+  if (e.code === 'KeyL' && DEBUG) dbg.download();
   if (e.code === 'KeyR') for (const p of pads) if (p.connected) { p.calib.reset(); p.tracker.reset(); }
 });
 window.addEventListener('keyup', (e) => {
@@ -573,11 +623,13 @@ function onMatchEvent(e) {
       pads.forEach((p) => p.tracker.reset());
       break;
     case 'throw':
+      dbg.add('throw', { player: e.player, ...e.throw });
       cam.mode = 'follow';
       ballQuat.identity();
       rollTimer = 0;
       break;
     case 'ballHit':
+      dbg.add('ballHit', { player: e.player, speed: r2(e.speed), x: r2(e.x) });
       cam.shake = 0.5 + e.speed * 0.05;
       sound.crash(clamp(e.speed / 9, 0, 1));
       haptic(pad?.slot, [70, 30, 110]);
@@ -586,10 +638,12 @@ function onMatchEvent(e) {
       sound.pin();
       break;
     case 'gutter':
+      dbg.add('gutter', { player: e.player, side: e.side });
       sound.gutter();
       haptic(pad?.slot, [220]);
       break;
     case 'roll': {
+      dbg.add('roll', { player: e.player, pins: e.pins, strike: e.strike, spare: e.spare, gutter: e.gutter, frame: e.frame, roll: e.roll });
       cam.mode = 'pins';
       ui.holdUntil = now() + 2300;
       ui.lockUntil = now() + 2400;
@@ -680,6 +734,7 @@ resize();
 // ── Frame loop ─────────────────────────────────────────────────────────────
 let last = performance.now();
 let rollSound = 0;
+let ballLog = 0;
 function frame(t) {
   requestAnimationFrame(frame);
   const dt = Math.min((t - last) / 1000, 0.05);
@@ -717,6 +772,11 @@ function frame(t) {
     rollSound += dt;
     if (rollSound > 0.11 && !b.done) { rollSound = 0; sound.rolling(sp, b.gutter !== 0); }
     drawPins(dt, m.sim.pins);
+    ballLog += dt;
+    if (DEBUG && ballLog > 0.2) {
+      ballLog = 0;
+      dbg.add('ball', { x: r2(b.x), z: r2(b.z), vx: r2(b.vx), vz: r2(b.vz), speed: r2(sp), gutter: b.gutter, hookParam: r2(m.sim.throw.hook) });
+    }
   } else {
     drawPins(dt, null);
     const aiming = m?.state === 'aim' && ui.phase === 'play' && t > ui.lockUntil;
@@ -750,14 +810,22 @@ function frame(t) {
   if (!ui.kb.held) $('meter').classList.remove('on');
   if (!(m?.state === 'aim' && ui.phase === 'play')) $('turn-live').textContent = '';
 
+  if (DEBUG) {
+    const pad = m && ui.phase === 'play' ? padOf(m.current) : pads.find((p) => p.connected);
+    const last = [...dbg.rows].reverse().find((r) => r.kind === 'sample' && (!pad || r.slot === pad.slot));
+    $('debug').textContent = last
+      ? `P${last.slot + 1} ${last.grip} grip  held=${last.held}\nheading ${last.heading}° (rel ${last.relHeading})  pitch ${last.pitch}°\nrates rx ${last.rx} ry ${last.ry} rz ${last.rz}\nswing ${last.swing}  twist ${last.twist}  yaw→ ${last.yawRight}\nswept ${last.swept}°  aim ${last.liveAimDeg}°\nacc ${last.ax} ${last.ay} ${last.az}\nrows ${dbg.rows.length}  ·  L saves log`
+      : 'debug on — waiting for a phone';
+  }
   updateCamera(dt);
   renderer.render(scene, camera);
 }
 
+if (DEBUG) { $('debug').hidden = false; dbg.add('start', { ua: navigator.userAgent }); }
 resetPins(rack(), false);
 ball.visible = false;
 arrow.visible = false;
 requestAnimationFrame(frame);
 
 // Debug hooks for the end-to-end tests.
-window.__bowling = { ui, pads, get match() { return ui.match; }, startMatch };
+window.__bowling = { ui, pads, dbg, get match() { return ui.match; }, startMatch };

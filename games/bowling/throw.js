@@ -240,7 +240,7 @@ export class ThrowTracker {
     }
     if (!held && this.held) {
       this.held = false;
-      if (now - this.gripAt < THROW.gripDebounceMs) return { type: 'cancel' };
+      if (now - this.gripAt < THROW.gripDebounceMs) return { type: 'cancel', reason: 'released-too-soon', info: { heldMs: Math.round(now - this.gripAt) } };
       return this.release(rel, now);
     }
     return null;
@@ -250,7 +250,18 @@ export class ThrowTracker {
     const recent = this.buffer.filter((b) => now - b.at <= THROW.windowMs);
     const gyro = recent.filter((b) => b.hasGyro);
     const peak = gyro.length ? Math.max(...gyro.map((b) => b.swing)) : 0;
-    if (peak < THROW.minSwing) return { type: 'cancel' };
+    const twistMean = gyro.length ? gyro.reduce((a, b) => a + b.twist, 0) / gyro.length : 0;
+    // What the decision was based on — surfaced so a debug log can explain a throw.
+    const info = {
+      heldMs: Math.round(now - this.gripAt),
+      windowSamples: recent.length,
+      gyroSamples: gyro.length,
+      peakSwingDegPerS: Math.round(peak),
+      twistMeanDegPerS: Math.round(twistMean),
+      gripAimDeg: +this.gripAim.toFixed(2),
+      sweptDeg: +this.swept.toFixed(2),
+    };
+    if (peak < THROW.minSwing) return { type: 'cancel', reason: gyro.length ? 'no-swing' : 'no-gyro-data', info };
     const hook = this.hookFrom(gyro.reduce((a, b) => a + b.twist, 0) / gyro.length);
     const aimDeg = this.damp(this.gripAim + this.swept);
     const speed = speedFromSwing(peak);
@@ -260,6 +271,7 @@ export class ThrowTracker {
       angle: aimDeg * DEG,
       hook,
       power: clamp((speed - 2.2) / 8, 0, 1),
+      info,
     };
   }
 }

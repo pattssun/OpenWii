@@ -86,6 +86,8 @@
   #final { display: grid; gap: 8px; max-width: 520px; margin: 0 auto 18px; }
   #final div { display: flex; justify-content: space-between; padding: 12px 18px; border-radius: 12px; background: #ffffff10; font-size: 22px; font-weight: 800; }
   #final .win { background: color-mix(in srgb, var(--c) 28%, transparent); }
+  #debug { position: absolute; right: 20px; top: 16px; z-index: 7; margin: 0; padding: 10px 14px; border-radius: 10px;
+    background: #000a; border: 1px solid var(--line); font: 12px/1.5 ui-monospace, Menlo, monospace; color: #9fe3b4; white-space: pre; }
   #topbar { position: absolute; left: 20px; top: 16px; z-index: 6; font-size: 13px; }
   #topbar a { color: #9db4dd; text-decoration: none; pointer-events: auto; cursor: pointer; }
 </style>
@@ -100,6 +102,7 @@
 <div id="hint" hidden></div>
 <div id="links"></div>
 <div id="banner"></div>
+<pre id="debug" hidden></pre>
 
 <div id="lobby" class="scrim">
   <div class="panel">
