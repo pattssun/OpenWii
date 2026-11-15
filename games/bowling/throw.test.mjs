@@ -90,7 +90,7 @@ test('relative heading is signed: right of straight is positive', () => {
 // ── Throwing ───────────────────────────────────────────────────────────────
 
 /** Grip, swing for a while, release. Returns every non-null event. */
-function throwWith({ cal, swing = 450, twist = 0, grip = 600, swingMs = 260, aim = 0, drift = 0, make = flat, hold = true } = {}) {
+function throwWith({ cal, swing = 450, twist = 0, grip = 600, swingMs = 260, aim = 0, drift = 0, yaw = 0, make = flat, hold = true } = {}) {
   const tracker = new ThrowTracker(cal);
   const out = [];
   let t = 1500;
@@ -98,7 +98,7 @@ function throwWith({ cal, swing = 450, twist = 0, grip = 600, swingMs = 260, aim
   for (let i = 0; i < grip / 8; i += 1, t += 8) push(tracker.update(make(cal.heading + aim, 0, { rx: 0, ry: 0, rz: 0 }), t, hold && i > 3));
   for (let i = 0; i < swingMs / 8; i += 1, t += 8) {
     const k = Math.sin((i / (swingMs / 8)) * Math.PI);
-    push(tracker.update(make(cal.heading + aim + drift * (i / (swingMs / 8)), 0, { rx: swing * k, ry: twist, rz: 0 }), t, hold));
+    push(tracker.update(make(cal.heading + aim + drift * (i / (swingMs / 8)), 0, { rx: swing * k, ry: twist, rz: -yaw }), t, hold));
   }
   push(tracker.update(make(cal.heading + aim + drift, 0, { rx: swing * 0.05, ry: twist, rz: 0 }), t, false));
   return out;
@@ -136,7 +136,7 @@ test('aim follows where the phone points when the ball is gripped', () => {
   const cal = calibrated(30);
   const right = throwWith({ cal, aim: 8 }).at(-1);
   const left = throwWith({ cal, aim: -8 }).at(-1);
-  const expected = 8 * THROW.aimGain * DEG;
+  const expected = Math.min(8 * THROW.aimGain, THROW.maxBallDeg) * DEG;
   assert.ok(Math.abs(right.angle - expected) < 0.01, `right ${right.angle} vs ${expected}`);
   assert.ok(Math.abs(left.angle + expected) < 0.01, `left ${left.angle}`);
   assert.ok(Math.abs(right.angle + left.angle) < 0.005, 'symmetric');
@@ -145,7 +145,7 @@ test('aim follows where the phone points when the ball is gripped', () => {
 test('aim is clamped so a wild swing cannot throw sideways', () => {
   const cal = calibrated(0);
   const t = throwWith({ cal, aim: 80 }).at(-1);
-  assert.ok(t.angle <= 17.01 * THROW.aimGain * DEG);
+  assert.ok(Math.abs(t.angle) <= THROW.maxBallDeg * DEG + 1e-9);
 });
 
 test('wrist twist sets the hook, and its sign carries through', () => {
@@ -188,10 +188,51 @@ test('the aim reading follows the phone for the on-screen arrow', () => {
   const cal = calibrated(100);
   const tracker = new ThrowTracker(cal);
   assert.ok(Math.abs(tracker.aim(flat(112)) - 12 * THROW.aimGain) < 0.2);
-  assert.ok(tracker.aim(flat(160)) <= THROW.maxAimDeg * THROW.aimGain + 1e-9);
+  assert.ok(tracker.aim(flat(160)) <= THROW.maxBallDeg + 1e-9);
   assert.equal(new ThrowTracker(new StanceCalibration()).aim(flat(10)), 0);
 });
 
 test('calibration constants are sane', () => {
   assert.ok(CALIBRATION.holdMs >= 400 && CALIBRATION.holdMs <= 1000);
+});
+
+test('sweeping the hand sideways during the swing steers the ball', () => {
+  const cal = calibrated(0);
+  // 40 deg/s of clockwise (rightward) sweep for the 260 ms swing ≈ 10° of hand travel.
+  const right = throwWith({ cal, yaw: 40 }).at(-1);
+  const left = throwWith({ cal, yaw: -40 }).at(-1);
+  const straight = throwWith({ cal, yaw: 0 }).at(-1);
+  assert.ok(right.angle > 0.01, `right ${right.angle}`);
+  assert.ok(left.angle < -0.01, `left ${left.angle}`);
+  assert.ok(Math.abs(straight.angle) < 0.002);
+  assert.ok(Math.abs(right.angle + left.angle) < 0.004, 'symmetric');
+});
+
+test('the swept direction counts even when the heading reading goes wild mid-swing', () => {
+  const cal = calibrated(0);
+  // Phone pitched steeply while swinging: the beam heading is meaningless, the gyro is not.
+  const make = (heading, pitch, motion) => flat(heading + (motion.rx > 100 ? 90 : 0), pitch, motion);
+  const t = throwWith({ cal, yaw: 40, make }).at(-1);
+  assert.equal(t.type, 'throw');
+  assert.ok(t.angle > 0.01 && t.angle <= THROW.maxBallDeg * DEG + 1e-9, `angle ${t.angle}`);
+});
+
+test('the live aim arrow follows the swing while the ball is gripped', () => {
+  const cal = calibrated(0);
+  const tracker = new ThrowTracker(cal);
+  let t = 1500;
+  for (let i = 0; i < 40; i += 1, t += 8) tracker.update(flat(0), t, i > 3);
+  const before = tracker.liveAim(flat(0));
+  for (let i = 0; i < 40; i += 1, t += 8) tracker.update(flat(0, 0, { rx: 200, ry: 0, rz: -60 }), t, true);
+  assert.ok(tracker.liveAim(flat(0)) > before + 0.5, 'arrow moved right as the hand swept right');
+});
+
+test('live hook reports wrist twist while the ball is gripped', () => {
+  const cal = calibrated(0);
+  const tracker = new ThrowTracker(cal);
+  let t = 1500;
+  for (let i = 0; i < 40; i += 1, t += 8) tracker.update(flat(0, 0, { rx: 100, ry: 300, rz: 0 }), t, true);
+  assert.ok(tracker.liveHook(t) > 0.5);
+  for (let i = 0; i < 40; i += 1, t += 8) tracker.update(flat(0, 0, { rx: 100, ry: -300, rz: 0 }), t, true);
+  assert.ok(tracker.liveHook(t) < -0.5);
 });

@@ -13,9 +13,11 @@ import { axesFromSample, angleDelta, clamp, DEG } from '../../core/orientation.j
  *                        swung, aim from where the phone points, hook from how
  *                        far the wrist twisted.
  *
- * Aim is deliberately damped (`aimGain`): a real lane is about 3° wide as seen
- * from the foul line, so one-to-one mapping would turn ordinary hand wobble
- * into gutter balls. Position on the foul line does the coarse aiming.
+ * Aim = where the phone points when you grip the ball, plus every degree your
+ * hand sweeps sideways while you swing (integrated from the gyro, which is
+ * reliable at any arm pitch). It is damped (`aimGain`): a real lane is about 3°
+ * wide as seen from the foul line, so one-to-one mapping would turn ordinary
+ * hand wobble into gutter balls. Position on the foul line does the coarse aiming.
  *
  * Samples are the relay's `orientation` packets: attitude (alpha/beta/gamma or
  * a quaternion) plus `motion` with the gyro rates rx/ry/rz in deg/s.
@@ -56,9 +58,13 @@ export function readSample(sample, invertTwist = false) {
     // Roll about the pointing beam: + is clockwise seen from behind the phone.
     twist = (w.x * local.x + w.y * local.y + w.z * local.z) * (invertTwist ? -1 : 1);
   }
+  // Turn rate about the world's vertical axis, + = turning right. Unlike the
+  // beam's heading this stays meaningful when the arm swings through vertical.
+  const yawRight = w ? -(w.x * axes.x.z + w.y * axes.y.z + w.z * axes.z.z) : 0;
   return {
     beam,
     grip,
+    yawRight,
     heading: headingOf(beam),
     pitch: Math.asin(clamp(beam.z, -1, 1)) / DEG,
     total,
@@ -151,9 +157,8 @@ export const THROW = {
   minSwing: 45,           // deg/s of swing needed for a release to count as a throw
   windowMs: 170,          // the last stretch of motion that decides the release
   gripDebounceMs: 120,    // ignore a release this soon after the grip
-  maxAimDeg: 17,          // how far (degrees) the phone's heading may stray from straight
-  aimGain: 0.25,          // lane is only ~3° wide from the foul line: scale hand wobble down
-  steerShare: 0.6,        // how much of the yaw change during the swing steers the ball
+  aimGain: 0.4,           // ball degrees per degree of hand sweep (lane is ~3° wide)
+  maxBallDeg: 5,          // the ball can never leave the foul line more steeply than this
   twistDeadzone: 40,      // deg/s of wrist roll ignored
   twistFull: 380,         // deg/s of wrist roll that is a full hook
 };
@@ -172,6 +177,8 @@ export class ThrowTracker {
     this.held = false;
     this.gripAt = 0;
     this.gripAim = 0;
+    this.swept = 0;       // degrees the hand has swept sideways since the grip, + = right
+    this.lastAt = 0;
     this.buffer = [];
   }
 
@@ -179,7 +186,28 @@ export class ThrowTracker {
   aim(sample) {
     if (!this.calibration.ready || !sample) return 0;
     const s = readSample(sample, this.invertTwist);
-    return clamp(this.calibration.relative(s.heading), -THROW.maxAimDeg, THROW.maxAimDeg) * THROW.aimGain;
+    return this.damp(this.calibration.relative(s.heading));
+  }
+
+  damp(phoneDeg) {
+    return clamp(phoneDeg * THROW.aimGain, -THROW.maxBallDeg, THROW.maxBallDeg);
+  }
+
+  /** Ball angle (degrees, + right) if released now: the live arrow while swinging. */
+  liveAim(sample) {
+    return this.held ? this.damp(this.gripAim + this.swept) : this.aim(sample);
+  }
+
+  /** Hook (-1..1) if released now, from the last stretch of wrist twist. */
+  liveHook(now) {
+    const recent = this.buffer.filter((b) => now - b.at <= THROW.windowMs && b.hasGyro);
+    if (!recent.length) return 0;
+    return this.hookFrom(recent.reduce((a, b) => a + b.twist, 0) / recent.length);
+  }
+
+  hookFrom(twist) {
+    const dead = Math.sign(twist) * Math.max(0, Math.abs(twist) - THROW.twistDeadzone);
+    return clamp(dead / (THROW.twistFull - THROW.twistDeadzone), -1, 1);
   }
 
   /**
@@ -197,10 +225,14 @@ export class ThrowTracker {
     const s = readSample(sample, this.invertTwist);
     const rel = this.calibration.relative(s.heading);
     this.buffer.push({ at: now, rel, swing: s.swing, twist: s.twist, total: s.total, hasGyro: s.hasGyro });
+    const dt = this.lastAt ? clamp((now - this.lastAt) / 1000, 0, 0.05) : 0;
+    this.lastAt = now;
+    if (this.held && s.hasGyro) this.swept += s.yawRight * dt;
     this.buffer = this.buffer.filter((b) => now - b.at <= 400);
 
     if (held && !this.held) {
       this.held = true;
+      this.swept = 0;
       this.gripAt = now;
       const settled = this.buffer.filter((b) => now - b.at <= 150);
       this.gripAim = settled.reduce((a, b) => a + b.rel, 0) / settled.length;
@@ -214,24 +246,18 @@ export class ThrowTracker {
     return null;
   }
 
-  release(relNow, now) {
+  release(_relNow, now) {
     const recent = this.buffer.filter((b) => now - b.at <= THROW.windowMs);
     const gyro = recent.filter((b) => b.hasGyro);
     const peak = gyro.length ? Math.max(...gyro.map((b) => b.swing)) : 0;
     if (peak < THROW.minSwing) return { type: 'cancel' };
-    const twist = gyro.reduce((a, b) => a + b.twist, 0) / gyro.length;
-    const dead = Math.sign(twist) * Math.max(0, Math.abs(twist) - THROW.twistDeadzone);
-    const hook = clamp(dead / (THROW.twistFull - THROW.twistDeadzone), -1, 1);
-    const aimDeg = clamp(
-      this.gripAim + THROW.steerShare * (relNow - this.gripAim),
-      -THROW.maxAimDeg,
-      THROW.maxAimDeg,
-    );
+    const hook = this.hookFrom(gyro.reduce((a, b) => a + b.twist, 0) / gyro.length);
+    const aimDeg = this.damp(this.gripAim + this.swept);
     const speed = speedFromSwing(peak);
     return {
       type: 'throw',
       speed,
-      angle: aimDeg * THROW.aimGain * DEG,
+      angle: aimDeg * DEG,
       hook,
       power: clamp((speed - 2.2) / 8, 0, 1),
     };

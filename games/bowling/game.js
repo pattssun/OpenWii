@@ -726,7 +726,16 @@ function frame(t) {
       const x0 = ui.x0[m.current];
       const pad = padOf(m.current);
       let aim = ui.kb.aim;
-      if (pad?.connected && pad.calib.ready && pad.sample) aim = (pad.tracker.aim(pad.sample) * Math.PI) / 180;
+      let live = '';
+      if (pad?.connected && pad.calib.ready && pad.sample) {
+        const deg = pad.tracker.liveAim(pad.sample);
+        aim = (deg * Math.PI) / 180;
+        const hook = pad.tracker.liveHook(t);
+        const side = (v, l, r) => (Math.abs(v) < 0.5 ? 'straight' : v > 0 ? r : l);
+        live = `Aim ${Math.abs(deg).toFixed(1)}° ${side(deg, 'left', 'right')}`
+          + (ui.gripped ? ` · Hook ${Math.round(Math.abs(hook) * 100)}% ${side(hook * 2, 'left', 'right')}` : '');
+      }
+      $('turn-live').textContent = live;
       const lift = ui.gripped ? 0.18 + 0.05 * Math.sin(t / 90) : 0;
       ball.position.set(x0, LANE.ballRadius + lift, -0.3);
       arrow.position.set(x0, 0.01, 0);
@@ -739,6 +748,7 @@ function frame(t) {
     }
   }
   if (!ui.kb.held) $('meter').classList.remove('on');
+  if (!(m?.state === 'aim' && ui.phase === 'play')) $('turn-live').textContent = '';
 
   updateCamera(dt);
   renderer.render(scene, camera);
